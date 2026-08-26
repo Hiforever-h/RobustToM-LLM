@@ -711,11 +711,19 @@ class RayPPOTrainer(object):
                     with _timer('gen', timing_raw):
                         gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
 
+                    prompt_batch_size = len(batch.batch)
+                    rollout_count = self.config.actor_rollout_ref.rollout.n
                     batch.non_tensor_batch['uid'] = np.array(
-                        [f'{current_step}:{index}' for index in range(len(batch.batch))],
+                        [f'{current_step}:{index}' for index in range(prompt_batch_size)],
                         dtype=object)
                     # repeat to align with repeated responses in rollout
-                    batch = batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
+                    batch = batch.repeat(repeat_times=rollout_count, interleave=True)
+                    # Preserve a stable candidate identity across token-balance reordering.
+                    # With interleave=True each prompt occupies one contiguous n-sized block.
+                    batch.non_tensor_batch['rollout_index'] = np.tile(
+                        np.arange(rollout_count, dtype=np.int64),
+                        prompt_batch_size,
+                    ).astype(object)
                     batch = batch.union(gen_batch_output)
 
                     # balance the number of valid tokens on each dp rank.

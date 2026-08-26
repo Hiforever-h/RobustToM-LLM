@@ -1,6 +1,5 @@
 import importlib.util
 import json
-import math
 import sys
 import types
 import unittest
@@ -14,14 +13,15 @@ from grpo.prompt import ORDER_TRACE_INSTRUCTION, build_grpo_prompt
 from rft.common import read_jsonl
 from rft.reward import score_process_output
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class FakeTokenizer:
     eos_token_id = 99
 
-    def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=False):
+    def apply_chat_template(
+        self, messages, tokenize=False, add_generation_prompt=False
+    ):
         rendered = f"<user>{messages[0]['content']}</user><assistant>"
         return [ord(char) for char in rendered] if tokenize else rendered
 
@@ -32,7 +32,9 @@ class FakeTokenizer:
 class GrpoPromptAndDataTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.raw = read_jsonl(ROOT / "data/counterfactual_process_reward_v3/train.jsonl")[0]
+        cls.raw = read_jsonl(
+            ROOT / "data/counterfactual_process_reward_v3/train.jsonl"
+        )[0]
         cls.derived = read_jsonl(ROOT / "data/rft/derived_v3_fewshot/train.jsonl")
         cls.derived_by_id = {row["global_sample_id"]: row for row in cls.derived}
 
@@ -61,7 +63,9 @@ class GrpoPromptAndDataTest(unittest.TestCase):
         self.assertEqual(row["data_source"], "robust_tom_process_v3")
         self.assertEqual(row["prompt"][0]["role"], "user")
         self.assertIn(ORDER_TRACE_INSTRUCTION, row["prompt"][0]["content"])
-        self.assertEqual(json.loads(row["reward_model"]["ground_truth"]), self.raw["process_target"])
+        self.assertEqual(
+            json.loads(row["reward_model"]["ground_truth"]), self.raw["process_target"]
+        )
         self.assertEqual(row["extra_info"]["index"], 7)
 
     def test_parquet_row_rejects_prompt_overflow(self):
@@ -88,9 +92,10 @@ class GrpoConfigTest(unittest.TestCase):
         rollout = actor_rollout_ref["rollout"]
         trainer = config["trainer"]
 
-        self.assertEqual(data["train_files"], (
-            "data/grpo/counterfactual_process_reward_v3_fewshot/train.parquet"
-        ))
+        self.assertEqual(
+            data["train_files"],
+            ("data/grpo/counterfactual_process_reward_v3_fewshot/train.parquet"),
+        )
         self.assertEqual(actor_rollout_ref["model"]["path"], "runs/final")
         self.assertEqual(actor_rollout_ref["ref"]["model_path"], "runs/final")
         self.assertEqual(data["max_prompt_length"], 2048)
@@ -106,7 +111,25 @@ class GrpoConfigTest(unittest.TestCase):
         self.assertEqual(trainer["total_training_steps"], 800)
         self.assertEqual(trainer["logger"], ["console", "wandb"])
         self.assertTrue(trainer["progress_bar"])
-        self.assertEqual((3200 // data["train_batch_size"]) * trainer["total_epochs"], 800)
+        self.assertEqual(
+            (3200 // data["train_batch_size"]) * trainer["total_epochs"], 800
+        )
+
+    def test_natural_training_config_keeps_json_experiment_unchanged(self):
+        with (ROOT / "verl/trainer/config/robust_tom_natural_grpo.yaml").open(
+            encoding="utf-8"
+        ) as stream:
+            config = yaml.safe_load(stream)
+
+        self.assertEqual(config["reward"]["mode"], "natural_cot_judge")
+        self.assertEqual(config["actor_rollout_ref"]["rollout"]["n"], 16)
+        self.assertEqual(config["data"]["max_response_length"], 384)
+        self.assertIn(
+            "counterfactual_process_reward_v4_natural",
+            config["data"]["train_files"],
+        )
+        self.assertFalse(config["reward"]["validation"]["judge_enabled"])
+        self.assertEqual(config["reward"]["judge"]["max_workers"], 8)
 
 
 class GrpoMetricsTest(unittest.TestCase):
@@ -136,9 +159,11 @@ class GrpoMetricsTest(unittest.TestCase):
         prediction = json.loads(json.dumps(target))
         prediction["belief_trace"][0]["location"] = "green_box"
         result = score_process_output(prediction, target)
-        metrics = summarize_reward_records([
-            {"result": result, "generation_reached_eos": True},
-        ])
+        metrics = summarize_reward_records(
+            [
+                {"result": result, "generation_reached_eos": True},
+            ]
+        )
         self.assertAlmostEqual(result["components"]["belief_trace"], 0.275)
         self.assertEqual(result["components"]["answer"], 0.0)
         self.assertAlmostEqual(metrics["reward/belief_trace_step_accuracy"], 0.5)
@@ -209,11 +234,13 @@ class VerlCoreAlgorithmTest(unittest.TestCase):
             mask,
             index=["a", "a", "b", "b"],
         )
-        self.assertTrue(torch.allclose(
-            advantages.squeeze(-1),
-            torch.tensor([-1.0, 1.0, 0.0, 0.0]),
-            atol=2e-6,
-        ))
+        self.assertTrue(
+            torch.allclose(
+                advantages.squeeze(-1),
+                torch.tensor([-1.0, 1.0, 0.0, 0.0]),
+                atol=2e-6,
+            )
+        )
 
 
 if __name__ == "__main__":

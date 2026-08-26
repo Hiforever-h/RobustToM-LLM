@@ -1,0 +1,52 @@
+{
+  "name": "RobustToM natural-CoT v4 source data",
+  "prompt_version": "natural-cot-think-state-v1",
+  "contains_process_response": false,
+  "event_numbers_removed": true,
+  "single_line_prompts": true,
+  "splits": {
+    "train": {
+      "count": 3200,
+      "pair_count": 1600,
+      "order_counts": {
+        "3": 896,
+        "2": 1504,
+        "1": 800
+      },
+      "intervention_counts": {
+        "observed": 1600,
+        "hidden": 1600
+      },
+      "input_sha256": "3089d6e54209e8a323405f88b903cf3e456eed48051f73a6dd8caf4ebd5977d5",
+      "output_sha256": "2f706dfc48a9c8146ccb337b0e49b9287f58beadb3da65e32df2bd7d52b5ffda"
+    },
+    "val": {
+      "count": 400,
+      "pair_count": 200,
+      "order_counts": {
+        "3": 100,
+        "2": 200,
+        "1": 100
+      },
+      "intervention_counts": {
+        "hidden": 200,
+        "observed": 200
+      },
+      "input_sha256": "2f0c90621cbbd4cce2422e987a654843db1a20d825ee3a24c7c5d352fc121258",
+      "output_sha256": "a1da7ed218c68ee5360e8a99f12f6e25216dc96251920d1147d08387865507b0"
+    },
+    "test": {
+      "count": 600,
+      "pair_count": 300,
+      "order_counts": {
+        "4": 600
+      },
+      "intervention_counts": {
+        "observed": 300,
+        "hidden": 300
+      },
+      "input_sha256": "b9e731723bd385dd30459c488d4e90b6d6a0372fa5e034431970c45bde1d6388",
+      "output_sha256": "d9c0902584851f52c86292a4e555da85f66f2a6b5b5cfdeba2af9af6fc7a2bb3"
+    }
+  }
+}

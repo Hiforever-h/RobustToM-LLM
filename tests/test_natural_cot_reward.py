@@ -3,8 +3,11 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from scripts.reward import (
+    DeepSeekJudge,
+    JudgeConfig,
     NaturalCoTReward,
     RewardConfig,
     RewardGroup,
@@ -144,12 +147,8 @@ class NaturalCoTRewardTest(unittest.TestCase):
             ]
         }
         result = normalize_judge_output(payload, ["c00", "c01"], 3)
-        self.assertEqual(
-            result["evaluations"][0]["reasoning_scores"], [1.0, 0.0, 0.0]
-        )
-        self.assertEqual(
-            result["evaluations"][1]["reasoning_scores"], [1.0, 0.5, 0.0]
-        )
+        self.assertEqual(result["evaluations"][0]["reasoning_scores"], [1.0, 0.0, 0.0])
+        self.assertEqual(result["evaluations"][1]["reasoning_scores"], [1.0, 0.5, 0.0])
         self.assertEqual(result["normalized_output_count"], 2)
 
     def test_multiple_answers_do_not_receive_answer_credit(self):
@@ -220,6 +219,81 @@ class NaturalCoTGroupTest(unittest.TestCase):
         groups = [self.group(str(index)) for index in range(3)]
         results = scorer.score_groups_concurrently(groups, max_workers=3)
         self.assertEqual([row["group_id"] for row in results], ["0", "1", "2"])
+
+    def test_deepseek_client_exposes_training_call_statistics(self):
+        api_payload = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "evaluations": [
+                                    {
+                                        "candidate_id": "c00",
+                                        "reasoning_scores": [1.0],
+                                    },
+                                    {
+                                        "candidate_id": "c01",
+                                        "reasoning_scores": [0.0],
+                                    },
+                                ]
+                            }
+                        )
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+            },
+        }
+
+        class Response:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return json.dumps(api_payload).encode()
+
+        judge = DeepSeekJudge(
+            JudgeConfig(retries=0, timeout_seconds=1), api_key="test-key"
+        )
+        with patch("urllib.request.urlopen", return_value=Response()):
+            judge.score_group(self.group())
+        stats = judge.stats_snapshot()
+        self.assertEqual(stats["group_calls"], 1)
+        self.assertEqual(stats["candidate_calls"], 2)
+        self.assertEqual(stats["network_requests"], 1)
+        self.assertEqual(stats["successful_groups"], 1)
+        self.assertEqual(stats["total_tokens"], 120)
+
+    def test_local_preflight_checks_cache_without_network(self):
+        with tempfile.TemporaryDirectory() as directory:
+            judge = DeepSeekJudge(
+                JudgeConfig(cache_dir=Path(directory)), api_key="test-key"
+            )
+            result = judge.preflight(check_remote=False)
+        self.assertFalse(result["remote_checked"])
+        self.assertEqual(result["model"], "deepseek-v4-flash")
+
+    def test_cache_key_is_stable_across_training_step_uids(self):
+        with tempfile.TemporaryDirectory() as directory:
+            judge = DeepSeekJudge(
+                JudgeConfig(cache_dir=Path(directory)), api_key="test-key"
+            )
+            first = self.group("step-1")
+            second = self.group("step-2")
+            self.assertEqual(
+                judge._cache_path(first, judge._request_body(first)),
+                judge._cache_path(second, judge._request_body(second)),
+            )
 
 
 if __name__ == "__main__":

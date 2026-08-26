@@ -10,7 +10,7 @@ import ray
 import torch
 from omegaconf import OmegaConf
 
-from grpo.reward_manager import ProcessRewardManager
+from grpo.reward_manager import build_reward_managers
 
 
 def _set_seed(seed: int) -> None:
@@ -34,23 +34,38 @@ def _validate_config(config) -> None:
             "ppo_mini_batch_size must equal train_batch_size * rollout.n "
             f"({trajectory_count})"
         )
-    if config.actor_rollout_ref.actor.ppo_mini_batch_size % \
-            config.actor_rollout_ref.actor.ppo_micro_batch_size != 0:
-        raise ValueError("PPO mini-batch size must be divisible by the micro-batch size")
-    if config.data.max_prompt_length != 2048:
-        raise ValueError("The audited v3 prompt limit is 2048")
-    if config.data.max_response_length != 256:
-        raise ValueError("The audited v3 rollout response limit is 256")
+    if (
+        config.actor_rollout_ref.actor.ppo_mini_batch_size
+        % config.actor_rollout_ref.actor.ppo_micro_batch_size
+        != 0
+    ):
+        raise ValueError(
+            "PPO mini-batch size must be divisible by the micro-batch size"
+        )
+    if config.data.max_prompt_length <= 0:
+        raise ValueError("max_prompt_length must be positive")
+    if config.data.max_response_length <= 0:
+        raise ValueError("max_response_length must be positive")
+    reward_mode = str(config.get("reward", {}).get("mode", "json_rule"))
+    if reward_mode == "natural_cot_judge" and config.data.max_response_length < 384:
+        raise ValueError(
+            "Natural-CoT training requires max_response_length >= 384 to avoid "
+            "systematic Think/Answer truncation"
+        )
 
 
 @hydra.main(config_path="config", config_name="robust_tom_grpo", version_base=None)
 def main(config) -> None:
     _validate_config(config)
     if not ray.is_initialized():
-        ray.init(runtime_env={"env_vars": {
-            "TOKENIZERS_PARALLELISM": "true",
-            "NCCL_DEBUG": "WARN",
-        }})
+        ray.init(
+            runtime_env={
+                "env_vars": {
+                    "TOKENIZERS_PARALLELISM": "true",
+                    "NCCL_DEBUG": "WARN",
+                }
+            }
+        )
     ray.get(main_task.remote(config))
 
 
@@ -93,8 +108,15 @@ def main_task(config) -> None:
             Role.RefPolicy: pool_id,
         },
     )
-    reward_fn = ProcessRewardManager(tokenizer=tokenizer, num_examine=0)
-    val_reward_fn = ProcessRewardManager(tokenizer=tokenizer, num_examine=1)
+    reward_fn, val_reward_fn = build_reward_managers(
+        tokenizer=tokenizer,
+        reward_config=config.get("reward", {"mode": "json_rule"}),
+        rollout_n=int(config.actor_rollout_ref.rollout.n),
+    )
+    if hasattr(reward_fn, "preflight"):
+        check_remote = bool(config.reward.judge.get("preflight_remote", True))
+        preflight = reward_fn.preflight(check_remote=check_remote)
+        pprint({"reward_preflight": preflight})
     trainer = RayPPOTrainer(
         config=config,
         tokenizer=tokenizer,
@@ -112,4 +134,3 @@ def main_task(config) -> None:
 
 if __name__ == "__main__":
     main()
-
