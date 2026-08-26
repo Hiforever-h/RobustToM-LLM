@@ -1,0 +1,9 @@
+model: Qwen/Qwen2.5-3B-Instruct
+revision: null
+num_samples: 16
+temperature: 0.8
+top_p: 0.95
+max_new_tokens: 256
+seed: 2026
+tensor_parallel_size: 1
+gpu_memory_utilization: 0.85

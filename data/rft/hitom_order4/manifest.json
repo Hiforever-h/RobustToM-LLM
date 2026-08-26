@@ -1,0 +1,25 @@
+{
+  "name": "Hi-ToM order-4 answer-only benchmark with symbolic-v3 few-shot prompts",
+  "source_dataset": "hi-tom-order4",
+  "source_file": "data/cleaned_tom/raw/hi_tom_3000.csv",
+  "source_file_sha256": "19315c3bef75a97d48821fe0d5898ef17bc1b0dd89612171bec32a5e351e3fd5",
+  "filter": {
+    "question_order": 4
+  },
+  "count": 600,
+  "deception_counts": {
+    "false": 300,
+    "true": 300
+  },
+  "story_length_counts": {
+    "1": 200,
+    "3": 200,
+    "2": 200
+  },
+  "few_shot_version": "symbolic-v3-3shot-1.0",
+  "few_shot_count": 3,
+  "story_event_numbering": "one-based sentence order",
+  "order_trace_instruction": "tom_order is exactly the number of names in belief_chain, not the number of story events. belief_trace contains exactly tom_order entries.",
+  "output_file": "data/rft/hitom_order4/test.jsonl",
+  "output_sha256": "f492200412077ab7561624f134d6a68bc8c62165a56497cef01204598d2e6f0a"
+}

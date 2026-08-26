@@ -1,0 +1,90 @@
+{
+  "name": "Symbolic State-Separated Counterfactual ToM v3",
+  "generator_version": "3.0",
+  "process_target_version": "2.0",
+  "seed": 2026,
+  "tokenizer": "/Users/hiforever/.cache/huggingface/hub/models--Qwen--Qwen2.5-7B-Instruct/snapshots/a09a35458c702b33eeacc393d103063234e8bc28",
+  "max_process_and_sequence_tokens": 2048,
+  "epistemic_semantics": {
+    "joint": "common knowledge within the named observer group",
+    "private": "first-order update for the isolated recipient only",
+    "hidden": "world update with no belief update",
+    "maximum_tom_order": 4
+  },
+  "records": 4200,
+  "pairs": 2100,
+  "split_counts": {
+    "train": 3200,
+    "val": 400,
+    "test": 600
+  },
+  "pair_split_counts": {
+    "train": 1600,
+    "val": 200,
+    "test": 300
+  },
+  "order_counts": {
+    "3": 996,
+    "2": 1704,
+    "1": 900,
+    "4": 600
+  },
+  "intervention_counts": {
+    "observed": 2100,
+    "hidden": 2100
+  },
+  "answer_letter_counts": {
+    "J": 287,
+    "I": 308,
+    "A": 295,
+    "C": 266,
+    "B": 290,
+    "K": 287,
+    "G": 259,
+    "F": 290,
+    "L": 263,
+    "O": 271,
+    "H": 270,
+    "N": 262,
+    "D": 273,
+    "M": 260,
+    "E": 319
+  },
+  "heuristic_accuracy": {
+    "initial_location": 0.0,
+    "inner_actual_belief": 0.214286,
+    "last_joint_move": 0.0,
+    "last_move": 0.0,
+    "outer_last_seen": 0.214286,
+    "previous_move": 0.0,
+    "world_state": 0.0
+  },
+  "order_2plus_all_shallow_heuristics_disagree_rate": 1.0,
+  "order_2plus_state_separation_rate": 1.0,
+  "suffix_3_accuracy": 0.022857,
+  "suffix_5_accuracy": 0.179524,
+  "pair_answer_flip_rate": 1.0,
+  "pair_position_match_rate": 1.0,
+  "critical_relative_position": {
+    "min": 0.333333,
+    "max": 0.833333,
+    "mean": 0.564731
+  },
+  "events_after_critical_counts": {
+    "5": 912,
+    "6": 2712,
+    "4": 370,
+    "2": 68,
+    "3": 138
+  },
+  "process_prompt_tokens": {
+    "max": 738,
+    "p95": 686,
+    "mean": 608.985
+  },
+  "process_sequence_tokens": {
+    "max": 874,
+    "p95": 815,
+    "mean": 711.015
+  }
+}

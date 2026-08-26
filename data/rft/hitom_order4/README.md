@@ -1,0 +1,3 @@
+# Hi-ToM order-4 answer-only benchmark
+
+This directory is derived from `data/cleaned_tom/raw/hi_tom_3000.csv` by selecting the 600 fourth-order questions. Each prompt uses the same one-based event numbering as the symbolic-v3 data, plus the symbolic-v3 three-shot block and the explicit `tom_order` / `belief_trace` cardinality instruction through `build_grpo_prompt`. The exact clarification is: `tom_order is exactly the number of names in belief_chain, not the number of story events. belief_trace contains exactly tom_order entries.` Only the final JSON `answer` is scored against `gold_answer`; Hi-ToM does not provide gold intermediate belief traces.

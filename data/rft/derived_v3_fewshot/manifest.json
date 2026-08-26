@@ -1,0 +1,46 @@
+{
+  "name": "RobustToM-RL symbolic v3 RFT split with 3-shot prompts",
+  "few_shot_version": "symbolic-v3-3shot-1.0",
+  "few_shot_count": 3,
+  "demonstration_orders": [
+    1,
+    2,
+    3
+  ],
+  "process_target_version": "2.0",
+  "input_dir": "data/rft/derived_v3",
+  "input_manifest_sha256": "9135f0ecc4d0b110a33da6d6b4d16880d147d5c63a41110eda53f236204b5510",
+  "tokenizer": "/Users/hiforever/.cache/huggingface/hub/models--Qwen--Qwen2.5-7B-Instruct/snapshots/a09a35458c702b33eeacc393d103063234e8bc28",
+  "max_process_and_sequence_tokens": 2048,
+  "split_counts": {
+    "train": 3200,
+    "dev": 400,
+    "test": 600
+  },
+  "pair_counts": {
+    "train": 1600,
+    "dev": 200,
+    "test": 300
+  },
+  "order_counts": {
+    "3": 996,
+    "2": 1704,
+    "1": 900,
+    "4": 600
+  },
+  "process_prompt_tokens": {
+    "max": 1347,
+    "p95": 1295,
+    "mean": 1217.985
+  },
+  "process_sequence_tokens": {
+    "max": 1483,
+    "p95": 1424,
+    "mean": 1320.015
+  },
+  "output_sha256": {
+    "train": "5120a57be15c6f47fc958905d32065a0efae769faab50e10e787a00eeded0c2a",
+    "dev": "0d83f449c88a065e986afaff7468aa3fe11d61dbbf947475928a05e23d3dd587",
+    "test": "8c18daa32b2c0eaa9bba81e007644f18f2860a4406924ff82bb60289c80b96ac"
+  }
+}

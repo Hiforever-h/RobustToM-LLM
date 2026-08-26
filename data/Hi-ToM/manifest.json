@@ -1,0 +1,62 @@
+{
+  "name": "Official Hi-ToM answer-only benchmark with symbolic-v3 prompts",
+  "source_dataset": "Hi-ToM/Hi-ToM_Dataset",
+  "source_url": "https://huggingface.co/datasets/Hi-ToM/Hi-ToM_Dataset",
+  "source_file": "data/Hi-ToM/Hi-ToM_data.json",
+  "source_file_sha256": "e64492527ac15119b4a60aacb2803a615b3fbc13bc37bbbceba6e339f42f3810",
+  "source_count": 1200,
+  "all_prompt_variants_count": 1200,
+  "canonical_prompting_type": "CoTP",
+  "test_count": 600,
+  "consistent_test_count": 462,
+  "order4_test_count": 120,
+  "order4_consistent_test_count": 65,
+  "order4_source_label_conflict_count": 55,
+  "source_label_conflict_count": 138,
+  "test_order_counts": {
+    "0": 120,
+    "1": 120,
+    "2": 120,
+    "3": 120,
+    "4": 120
+  },
+  "order4_deception_counts": {
+    "false": 60,
+    "true": 60
+  },
+  "order4_story_length_counts": {
+    "1": 40,
+    "2": 40,
+    "3": 40
+  },
+  "few_shot_version": "symbolic-v3-3shot-1.0",
+  "few_shot_count": 3,
+  "story_event_numbering": "one-based source event order",
+  "order_trace_instruction": "tom_order is exactly the number of names in belief_chain, not the number of story events. belief_trace contains exactly tom_order entries.",
+  "outputs": {
+    "all_prompt_variants": {
+      "path": "data/Hi-ToM/all_prompt_variants.jsonl",
+      "sha256": "0f61abcb7425a74e6de2931cfc0054f2838b51939c213d6e0b7d777c48c3145e"
+    },
+    "test": {
+      "path": "data/Hi-ToM/test.jsonl",
+      "sha256": "4ae6b1f0394aa9902e85cad1badf8445deb91aeaa471ef5c94169440b302a464"
+    },
+    "consistent_test": {
+      "path": "data/Hi-ToM/consistent_test.jsonl",
+      "sha256": "7b25a8d837244db0d3eaaad6c95b1187a799a087a36de5b7465aed4f41f52f8b"
+    },
+    "order4_test": {
+      "path": "data/Hi-ToM/order4_test.jsonl",
+      "sha256": "1b52fb36b6576e6eb0744d292881f8565a6d6a5fd5ad3b3fbfc9ba6d8641fffb"
+    },
+    "order4_consistent_test": {
+      "path": "data/Hi-ToM/order4_consistent_test.jsonl",
+      "sha256": "7935be434cd5b3348639a1633a2e50b9a720f3301f150d4df5dbf3709f7949fc"
+    },
+    "label_conflicts": {
+      "path": "data/Hi-ToM/label_conflicts.jsonl",
+      "sha256": "4d8924c4e103b296ceec8593a9c38cb03669a2563e3b34be67833b735b310762"
+    }
+  }
+}

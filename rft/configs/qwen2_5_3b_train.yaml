@@ -1,0 +1,13 @@
+model: Qwen/Qwen2.5-3B-Instruct
+revision: null
+max_seq_length: 2048
+per_device_train_batch_size: 2
+gradient_accumulation_steps: 16
+num_train_epochs: 1
+learning_rate: 1.0e-5
+warmup_ratio: 0.03
+weight_decay: 0.01
+max_grad_norm: 1.0
+seed: 2026
+logging_steps: 10
+report_to: tensorboard

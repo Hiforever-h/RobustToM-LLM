@@ -1,0 +1,72 @@
+{
+  "name": "ExploreToM official sample answer-only benchmark",
+  "source_dataset": "facebook/ExploreToM",
+  "source_url": "https://huggingface.co/datasets/facebook/ExploreToM",
+  "source_split": "train",
+  "license": "CC-BY-NC-4.0",
+  "canonical_test_warning": "The publisher says this sample is not the canonical ExploreToM test set.",
+  "source_file": "data/ExploreToM/ExploreToM-data-sample.csv",
+  "source_file_sha256": "f8462b1a2199819a2baef5ab321b7b9240249fe229b94c86d8d06c2c47fc448b",
+  "source_count": 13309,
+  "container_tom_question_count": 1485,
+  "eligible_before_dedup_count": 1060,
+  "removed_duplicate_count": 7,
+  "test_count": 1053,
+  "test_order_counts": {
+    "1": 422,
+    "2": 631
+  },
+  "test_story_type_counts": {
+    "all": 22,
+    "all+asymmetric": 16,
+    "allbutfantom": 24,
+    "allbutfantom+asymmetric": 33,
+    "tomi": 259,
+    "tomi+asymmetric": 147,
+    "tomi+info-exchange": 155,
+    "tomi+info-exchange+asymmetric": 90,
+    "tomi+object-state": 142,
+    "tomi+object-state+asymmetric": 112,
+    "tomi+room-changes": 30,
+    "tomi+room-changes+asymmetric": 23
+  },
+  "test_choice_count_counts": {
+    "2": 661,
+    "3": 327,
+    "4": 65
+  },
+  "selection": {
+    "question_order": [
+      1,
+      2
+    ],
+    "relation_prefix": "container_location",
+    "non_unique_mental_state": false,
+    "minimum_choice_count": 2,
+    "deduplicate_by": "story_structure + question + expected_answer",
+    "story_variant": "story_structure"
+  },
+  "few_shot_version": "symbolic-v3-3shot-1.0",
+  "few_shot_count": 3,
+  "story_event_numbering": "one-based sentence order",
+  "choice_generation": "Distinct target-object containers mentioned in story order, then deterministically shuffled by sample ID.",
+  "order_trace_instruction": "tom_order is exactly the number of names in belief_chain, not the number of story events. belief_trace contains exactly tom_order entries.",
+  "outputs": {
+    "all_container_questions": {
+      "path": "data/ExploreToM/all_container_questions.jsonl",
+      "sha256": "f55258d674371e93537311e65f2ac73a238b6c33b5b2f40dcb91a7033dfa8c82"
+    },
+    "test": {
+      "path": "data/ExploreToM/test.jsonl",
+      "sha256": "42a8833c74ad6539c96b1713bfb6f4baa3fcbb2030a8351cc64c7986230865df"
+    },
+    "order1_test": {
+      "path": "data/ExploreToM/order1_test.jsonl",
+      "sha256": "abe73301e6cdde585d37c890123947d1b8c279bbf355a463ac7e147552334936"
+    },
+    "order2_test": {
+      "path": "data/ExploreToM/order2_test.jsonl",
+      "sha256": "2edc97b7144683831b4157cfbb4d6572c711974163240156e6ea1185f3e4e03e"
+    }
+  }
+}
