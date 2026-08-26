@@ -25,7 +25,9 @@ python -m rft.score_candidates \
   --output "${SCORING_DIR}/${RUN_ID}/scored.jsonl" \
   --cache-dir "${JUDGE_CACHE_DIR:-${SCORING_DIR}/${RUN_ID}/judge_cache}" \
   --max-workers "${JUDGE_MAX_WORKERS:-8}" \
-  --judge-model "${JUDGE_MODEL:-deepseek-v4-flash}"
+  --judge-model "${JUDGE_MODEL:-deepseek-v4-flash}" \
+  --min-reward "${MIN_REWARD:-0.88}" \
+  --min-reasoning-score "${MIN_REASONING_SCORE:-0.5}"
 
 python -m rft.build_dataset \
   --scored "${SCORING_DIR}/${RUN_ID}/scored.jsonl" \

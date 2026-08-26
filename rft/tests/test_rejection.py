@@ -26,13 +26,17 @@ def response(answer: str) -> str:
 
 
 class FakeJudge:
+    def __init__(self, reasoning_score: float = 1.0):
+        self.reasoning_score = reasoning_score
+
     def score_group(self, group):
         return {
             "group_id": group.group_id,
             "evaluations": [
                 {
                     "candidate_id": candidate_id,
-                    "reasoning_scores": [1.0] * int(group.target["tom_order"]),
+                    "reasoning_scores": [self.reasoning_score]
+                    * int(group.target["tom_order"]),
                 }
                 for candidate_id in group.resolved_candidate_ids()
             ],
@@ -147,6 +151,29 @@ class RejectionTest(unittest.TestCase):
         self.assertFalse(scored[0]["accepted"])
         self.assertEqual(scored[0]["acceptance_reason"], "judge_disabled")
         self.assertTrue(manifest["rule_only"])
+
+    def test_continuous_good_reasoning_does_not_need_full_reward(self):
+        record = self.record("observed", "linen chest")
+        candidate = {
+            **record,
+            "raw_response": response("linen chest"),
+            "generation_reached_eos": True,
+        }
+        scorer = NaturalCoTReward(FakeJudge(reasoning_score=0.75))
+        scored, manifest = score_candidates([candidate], scorer=scorer)
+        self.assertEqual(scored[0]["score"]["reward"], 0.88)
+        self.assertTrue(scored[0]["accepted"])
+        self.assertEqual(manifest["acceptance_policy"]["min_reward"], 0.88)
+        output, _ = build_dataset(scored, min_samples=1)
+        self.assertEqual(output[0]["process_reward"], 0.88)
+
+        stricter, _ = score_candidates(
+            [candidate], scorer=scorer, min_reward=0.9
+        )
+        self.assertFalse(stricter[0]["accepted"])
+        self.assertEqual(
+            stricter[0]["acceptance_reason"], "reward_below_threshold"
+        )
 
 
 if __name__ == "__main__":

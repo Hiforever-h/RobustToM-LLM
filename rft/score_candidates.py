@@ -18,6 +18,9 @@ from scripts.reward import (
     score_rule_only_group,
 )
 
+DEFAULT_MIN_REWARD = 0.88
+DEFAULT_MIN_REASONING_SCORE = 0.5
+
 
 def _response(candidate: dict[str, Any]) -> str:
     for key in ("raw_response", "response", "accepted_response"):
@@ -45,14 +48,21 @@ def score_candidates(
     scorer: NaturalCoTReward | Any | None = None,
     rule_only: bool = False,
     max_workers: int = 8,
+    min_reward: float = DEFAULT_MIN_REWARD,
+    min_reasoning_score: float = DEFAULT_MIN_REASONING_SCORE,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Pack candidates by prompt, score them, and apply the RFT acceptance rule.
 
-    A full natural-CoT reward requires Judge reasoning scores. ``rule_only`` is
-    intended for local diagnostics and therefore cannot accept a trajectory.
+    Deterministic correctness and EOS are hard gates. Judge-backed reward and
+    every effective per-step reasoning score must meet configurable thresholds.
+    ``rule_only`` is diagnostic and therefore cannot accept a trajectory.
     """
     if max_workers < 1:
         raise ValueError("max_workers must be positive")
+    if not 0.0 <= min_reward <= 1.0:
+        raise ValueError("min_reward must be within [0, 1]")
+    if not 0.0 <= min_reasoning_score <= 1.0:
+        raise ValueError("min_reasoning_score must be within [0, 1]")
     if scorer is not None and rule_only:
         raise ValueError("scorer and rule_only are mutually exclusive")
 
@@ -149,15 +159,31 @@ def score_candidates(
         combined = record["combined"]
         rule = record["rule"]
         structure_ok = bool(rule["parsed"]["checks"]["structure_ok"])
+        all_states_correct = bool(rule["all_states_correct"])
+        answer_correct = bool(rule["answer_correct"])
+        effective_reasoning_scores = [
+            float(value) for value in combined["effective_reasoning_scores"]
+        ]
+        reasoning_threshold_ok = bool(effective_reasoning_scores) and all(
+            score >= min_reasoning_score for score in effective_reasoning_scores
+        )
+        reward_threshold_ok = float(combined["reward"]) >= min_reward
         reached_eos = item["candidate"].get("generation_reached_eos", False)
         accepted = (
-            combined["reward"] == 1.0
-            and structure_ok
+            structure_ok
+            and all_states_correct
+            and answer_correct
+            and reasoning_threshold_ok
+            and reward_threshold_ok
             and reached_eos is True
             and not rule_only
         )
         counters["full_reward"] += int(combined["reward"] == 1.0)
+        counters["reward_threshold"] += int(reward_threshold_ok)
+        counters["reasoning_threshold"] += int(reasoning_threshold_ok)
         counters["valid_structure"] += int(structure_ok)
+        counters["all_states_correct"] += int(all_states_correct)
+        counters["answer_correct"] += int(answer_correct)
         counters["eos"] += int(reached_eos is True)
         counters["accepted"] += int(accepted)
 
@@ -176,13 +202,19 @@ def score_candidates(
             }
         )
         if accepted:
-            enriched["acceptance_reason"] = "full_reward_valid_structure_eos"
+            enriched["acceptance_reason"] = "quality_thresholds_and_hard_gates_met"
         elif rule_only:
             enriched["acceptance_reason"] = "judge_disabled"
-        elif combined["reward"] != 1.0:
-            enriched["acceptance_reason"] = "reward_below_one"
         elif not structure_ok:
             enriched["acceptance_reason"] = "invalid_response_structure"
+        elif not all_states_correct:
+            enriched["acceptance_reason"] = "state_incorrect"
+        elif not answer_correct:
+            enriched["acceptance_reason"] = "answer_incorrect"
+        elif not reasoning_threshold_ok:
+            enriched["acceptance_reason"] = "reasoning_below_threshold"
+        elif not reward_threshold_ok:
+            enriched["acceptance_reason"] = "reward_below_threshold"
         else:
             enriched["acceptance_reason"] = "generation_not_stopped"
 
@@ -239,11 +271,23 @@ def score_candidates(
     manifest = {
         "reward_backend": "scripts.reward.NaturalCoTReward",
         "rule_only": rule_only,
+        "acceptance_policy": {
+            "min_reward": min_reward,
+            "min_reasoning_score": min_reasoning_score,
+            "require_valid_structure": True,
+            "require_all_states_correct": True,
+            "require_answer_correct": True,
+            "require_eos": True,
+        },
         "candidate_count": len(scored),
         "judge_group_count": len(groups) if not rule_only else 0,
         "accepted_count": counters["accepted"],
         "full_reward_count": counters["full_reward"],
+        "reward_threshold_count": counters["reward_threshold"],
+        "reasoning_threshold_count": counters["reasoning_threshold"],
         "valid_structure_count": counters["valid_structure"],
+        "all_states_correct_count": counters["all_states_correct"],
+        "answer_correct_count": counters["answer_correct"],
         "eos_count": counters["eos"],
         "acceptance_rate": counters["accepted"] / len(scored) if scored else 0.0,
         "prompt_count": len(coverage_rows),
@@ -283,6 +327,13 @@ def parse_args() -> argparse.Namespace:
         help="Run deterministic diagnostics without Judge calls; accepts nothing",
     )
     parser.add_argument("--max-workers", type=int, default=8)
+    parser.add_argument("--min-reward", type=float, default=DEFAULT_MIN_REWARD)
+    parser.add_argument(
+        "--min-reasoning-score",
+        type=float,
+        default=DEFAULT_MIN_REASONING_SCORE,
+        help="Minimum effective Judge score required for every Think step",
+    )
     parser.add_argument("--cache-dir", type=Path)
     parser.add_argument("--base-url", default="https://api.deepseek.com")
     parser.add_argument("--judge-model", default="deepseek-v4-flash")
@@ -315,6 +366,8 @@ def main() -> None:
         scorer=scorer,
         rule_only=args.rule_only,
         max_workers=args.max_workers,
+        min_reward=args.min_reward,
+        min_reasoning_score=args.min_reasoning_score,
     )
     manifest["source_candidate_sha256"] = sha256_file(args.candidates)
     if scorer is not None and hasattr(scorer.judge, "stats_snapshot"):

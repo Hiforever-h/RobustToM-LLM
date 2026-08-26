@@ -52,15 +52,25 @@ With the default weights:
 - process reward is 0.8 of the total and answer bonus is 0.2;
 - within each process step, state correctness is weighted 0.4 and Judge
   reasoning quality is weighted 0.6;
-- reasoning scores are restricted to 0, 0.5, or 1;
+- reasoning scores may be any finite value in `[0, 1]`; 0, 0.5, and 1 are
+  Judge calibration anchors;
 - a wrong state or missing reasoning gates that step's reasoning score;
 - the answer bonus requires every state and the final answer to be correct.
 
-RFT accepts a candidate only when all three conditions hold:
+RFT accepts a candidate only when all conditions hold:
 
-1. combined reward equals 1.0;
-2. the complete `Think/State/Answer` structure is valid;
-3. generation ended normally with EOS.
+1. combined reward is at least `--min-reward` (default 0.88);
+2. every effective per-step reasoning score is at least
+   `--min-reasoning-score` (default 0.5);
+3. the complete `Think/State/Answer` structure is valid;
+4. every `State` and the final `Answer` are correct;
+5. generation ended normally with EOS.
+
+With the default reward weights and correct states/answer, reward 0.88
+corresponds to an average reasoning score of 0.75. The per-step 0.5 floor stops
+one clearly bad step from being hidden by high scores on the other steps.
+Thresholds change acceptance only; accepted samples keep their actual reward
+and are never rewritten as reward 1.0.
 
 `--rule-only` is a diagnostic mode. It supplies zero Judge reasoning scores and
 therefore intentionally accepts no candidates.
@@ -129,7 +139,9 @@ python -m rft.score_candidates \
   --output "runs/rft_sampling/${RUN_ID}/scored.jsonl" \
   --cache-dir "runs/rft_sampling/${RUN_ID}/judge_cache" \
   --max-workers 8 \
-  --judge-model deepseek-v4-flash
+  --judge-model deepseek-v4-flash \
+  --min-reward 0.88 \
+  --min-reasoning-score 0.5
 
 python -m rft.build_dataset \
   --scored "runs/rft_sampling/${RUN_ID}/scored.jsonl" \
@@ -139,9 +151,11 @@ python -m rft.build_dataset \
   --seed 2026
 ```
 
-The scored JSONL keeps the combined score, deterministic rule details, Judge
-step scores, and Judge metadata for auditing. The dataset builder trains only
-on accepted sampled responses and never falls back to a gold response.
+The scored JSONL keeps the actual combined score, deterministic rule details,
+Judge step scores, acceptance reason/policy, and Judge metadata for auditing.
+The dataset builder consumes the resulting `accepted` flag; it does not apply a
+second score policy. It trains only on accepted sampled responses and never
+falls back to a gold response.
 
 By default, every accepted trajectory is eligible and incomplete
 observed/hidden pair coverage is allowed. Optional controls are:

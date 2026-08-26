@@ -119,6 +119,14 @@ class NaturalCoTRewardTest(unittest.TestCase):
         self.assertEqual(combine_reward(rule, [0.5, 0.5, 0.5])["reward"], 0.76)
         self.assertEqual(combine_reward(rule, [0.0, 0.0, 0.0])["reward"], 0.52)
 
+    def test_continuous_reasoning_scores_are_supported(self):
+        rule = score_rule_components(self.valid_response(), self.target())
+        combined = combine_reward(rule, [0.75, 0.8, 0.9])
+        self.assertEqual(combined["reasoning_scores"], [0.75, 0.8, 0.9])
+        self.assertAlmostEqual(combined["reward"], 0.912)
+        with self.assertRaisesRegex(ValueError, r"within \[0, 1\]"):
+            combine_reward(rule, [1.01, 0.5, 0.5])
+
     def test_missing_reasoning_gates_an_erroneous_high_judge_score(self):
         response = "Think 1:\nState: blue_canvas_bag\nAnswer: blue_canvas_bag"
         rule = score_rule_components(response, self.target(order=1))
@@ -150,6 +158,17 @@ class NaturalCoTRewardTest(unittest.TestCase):
         self.assertEqual(result["evaluations"][0]["reasoning_scores"], [1.0, 0.0, 0.0])
         self.assertEqual(result["evaluations"][1]["reasoning_scores"], [1.0, 0.5, 0.0])
         self.assertEqual(result["normalized_output_count"], 2)
+
+    def test_judge_output_accepts_continuous_scores(self):
+        payload = {
+            "evaluations": [
+                {"candidate_id": "c00", "reasoning_scores": [0.73, 0.88]}
+            ]
+        }
+        result = normalize_judge_output(payload, ["c00"], 2)
+        self.assertEqual(
+            result["evaluations"][0]["reasoning_scores"], [0.73, 0.88]
+        )
 
     def test_multiple_answers_do_not_receive_answer_credit(self):
         response = self.valid_response() + "\nAnswer: brass_locker"
