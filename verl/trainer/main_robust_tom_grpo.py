@@ -113,7 +113,9 @@ def main_task(config) -> None:
         reward_config=config.get("reward", {"mode": "json_rule"}),
         rollout_n=int(config.actor_rollout_ref.rollout.n),
     )
-    if hasattr(reward_fn, "preflight"):
+    if hasattr(reward_fn, "preflight") and not bool(
+        config.trainer.get("val_only", False)
+    ):
         check_remote = bool(config.reward.judge.get("preflight_remote", True))
         preflight = reward_fn.preflight(check_remote=check_remote)
         pprint({"reward_preflight": preflight})
