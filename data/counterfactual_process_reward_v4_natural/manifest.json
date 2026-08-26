@@ -3,7 +3,7 @@
   "prompt_version": "natural-cot-think-state-v1",
   "contains_process_response": false,
   "event_numbers_removed": true,
-  "single_line_prompts": true,
+  "single_line_prompts": false,
   "splits": {
     "train": {
       "count": 3200,
@@ -18,7 +18,7 @@
         "hidden": 1600
       },
       "input_sha256": "3089d6e54209e8a323405f88b903cf3e456eed48051f73a6dd8caf4ebd5977d5",
-      "output_sha256": "2f706dfc48a9c8146ccb337b0e49b9287f58beadb3da65e32df2bd7d52b5ffda"
+      "output_sha256": "d4bf6247a202d949580034c9ba2e46f133514a96b7b392761d39ed6b05eb6fe6"
     },
     "val": {
       "count": 400,
@@ -33,7 +33,7 @@
         "observed": 200
       },
       "input_sha256": "2f0c90621cbbd4cce2422e987a654843db1a20d825ee3a24c7c5d352fc121258",
-      "output_sha256": "a1da7ed218c68ee5360e8a99f12f6e25216dc96251920d1147d08387865507b0"
+      "output_sha256": "f0da8cf55ae1c7c3148798e95977c5dbf4a67e4f14a82ee607c8e75139d1edf7"
     },
     "test": {
       "count": 600,
@@ -46,7 +46,7 @@
         "hidden": 300
       },
       "input_sha256": "b9e731723bd385dd30459c488d4e90b6d6a0372fa5e034431970c45bde1d6388",
-      "output_sha256": "d9c0902584851f52c86292a4e555da85f66f2a6b5b5cfdeba2af9af6fc7a2bb3"
+      "output_sha256": "22d95cf2886affa6b6413c341f81e56060e9fabaf1f85322aee72dff134745be"
     }
   }
 }
