@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Score natural-CoT candidates with the shared deterministic rules and Judge."""
+"""Score natural-CoT candidates locally, with an optional external Judge."""
 
 from __future__ import annotations
 
@@ -46,16 +46,15 @@ def score_candidates(
     source_rows: list[dict[str, Any]] | None = None,
     *,
     scorer: NaturalCoTReward | Any | None = None,
-    rule_only: bool = False,
     max_workers: int = 8,
     min_reward: float = DEFAULT_MIN_REWARD,
     min_reasoning_score: float = DEFAULT_MIN_REASONING_SCORE,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Pack candidates by prompt, score them, and apply the RFT acceptance rule.
 
-    Deterministic correctness and EOS are hard gates. Judge-backed reward and
-    every effective per-step reasoning score must meet configurable thresholds.
-    ``rule_only`` is diagnostic and therefore cannot accept a trajectory.
+    By default, all States plus Answer correctness produce a binary local
+    reward, with structure and EOS as acceptance gates. Passing ``scorer``
+    explicitly enables the optional Judge-backed policy.
     """
     if max_workers < 1:
         raise ValueError("max_workers must be positive")
@@ -63,8 +62,7 @@ def score_candidates(
         raise ValueError("min_reward must be within [0, 1]")
     if not 0.0 <= min_reasoning_score <= 1.0:
         raise ValueError("min_reasoning_score must be within [0, 1]")
-    if scorer is not None and rule_only:
-        raise ValueError("scorer and rule_only are mutually exclusive")
+    judge_enabled = scorer is not None
 
     source_by_sample: dict[str, dict[str, Any]] = {}
     for row in source_rows or []:
@@ -94,7 +92,11 @@ def score_candidates(
             raise ValueError(f"Candidate target disagrees with source data: {sample}")
 
         actor_prompt = source.get("process_prompt") or candidate.get("process_prompt")
-        judge_prompt = source.get("judge_prompt") or candidate.get("judge_prompt")
+        judge_prompt = (
+            source.get("judge_prompt")
+            or candidate.get("judge_prompt")
+            or actor_prompt
+        )
         if not isinstance(actor_prompt, str) or not actor_prompt.strip():
             raise ValueError(f"Missing process_prompt for candidate {sample}")
         if not isinstance(judge_prompt, str) or not judge_prompt.strip():
@@ -139,13 +141,12 @@ def score_candidates(
                 ),
             )
         )
-    if rule_only:
-        group_results = [score_rule_only_group(group) for group in groups]
-    else:
-        scorer = scorer or NaturalCoTReward(DeepSeekJudge())
+    if judge_enabled:
         group_results = scorer.score_groups_concurrently(
             groups, max_workers=min(max_workers, len(groups)) if groups else 1
         )
+    else:
+        group_results = [score_rule_only_group(group) for group in groups]
 
     score_by_candidate: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
     for group_result in group_results:
@@ -156,18 +157,39 @@ def score_candidates(
     counters: Counter[str] = Counter()
     for item in prepared:
         record, group_result = score_by_candidate[item["judge_candidate_id"]]
-        combined = record["combined"]
         rule = record["rule"]
         structure_ok = bool(rule["parsed"]["checks"]["structure_ok"])
         all_states_correct = bool(rule["all_states_correct"])
         answer_correct = bool(rule["answer_correct"])
-        effective_reasoning_scores = [
-            float(value) for value in combined["effective_reasoning_scores"]
-        ]
-        reasoning_threshold_ok = bool(effective_reasoning_scores) and all(
-            score >= min_reasoning_score for score in effective_reasoning_scores
-        )
-        reward_threshold_ok = float(combined["reward"]) >= min_reward
+        if judge_enabled:
+            combined = record["combined"]
+            effective_reasoning_scores = [
+                float(value) for value in combined["effective_reasoning_scores"]
+            ]
+            reasoning_threshold_ok = bool(effective_reasoning_scores) and all(
+                score >= min_reasoning_score
+                for score in effective_reasoning_scores
+            )
+            reward_threshold_ok = float(combined["reward"]) >= min_reward
+        else:
+            full_state_answer = all_states_correct and answer_correct
+            combined = {
+                "scoring_mode": "state_answer_binary",
+                "reward": float(full_state_answer),
+                "process_reward": float(rule["state_accuracy"]),
+                "answer_bonus": float(answer_correct),
+                "step_rewards": [
+                    float(value) for value in rule["state_correct"]
+                ],
+                "reasoning_scores": None,
+                "effective_reasoning_scores": None,
+                "reasoning_present": list(rule["reasoning_present"]),
+                "state_correct": list(rule["state_correct"]),
+                "answer_correct": answer_correct,
+                "all_states_correct": all_states_correct,
+            }
+            reasoning_threshold_ok = True
+            reward_threshold_ok = full_state_answer
         reached_eos = item["candidate"].get("generation_reached_eos", False)
         accepted = (
             structure_ok
@@ -176,7 +198,6 @@ def score_candidates(
             and reasoning_threshold_ok
             and reward_threshold_ok
             and reached_eos is True
-            and not rule_only
         )
         counters["full_reward"] += int(combined["reward"] == 1.0)
         counters["reward_threshold"] += int(reward_threshold_ok)
@@ -202,18 +223,20 @@ def score_candidates(
             }
         )
         if accepted:
-            enriched["acceptance_reason"] = "quality_thresholds_and_hard_gates_met"
-        elif rule_only:
-            enriched["acceptance_reason"] = "judge_disabled"
+            enriched["acceptance_reason"] = (
+                "judge_quality_thresholds_and_hard_gates_met"
+                if judge_enabled
+                else "state_answer_correct_valid_structure_eos"
+            )
         elif not structure_ok:
             enriched["acceptance_reason"] = "invalid_response_structure"
         elif not all_states_correct:
             enriched["acceptance_reason"] = "state_incorrect"
         elif not answer_correct:
             enriched["acceptance_reason"] = "answer_incorrect"
-        elif not reasoning_threshold_ok:
+        elif judge_enabled and not reasoning_threshold_ok:
             enriched["acceptance_reason"] = "reasoning_below_threshold"
-        elif not reward_threshold_ok:
+        elif judge_enabled and not reward_threshold_ok:
             enriched["acceptance_reason"] = "reward_below_threshold"
         else:
             enriched["acceptance_reason"] = "generation_not_stopped"
@@ -269,18 +292,23 @@ def score_candidates(
         )
 
     manifest = {
-        "reward_backend": "scripts.reward.NaturalCoTReward",
-        "rule_only": rule_only,
+        "reward_backend": (
+            "scripts.reward.NaturalCoTReward"
+            if judge_enabled
+            else "scripts.reward.score_rule_components"
+        ),
+        "scoring_mode": "judge" if judge_enabled else "state_answer_binary",
+        "judge_enabled": judge_enabled,
         "acceptance_policy": {
-            "min_reward": min_reward,
-            "min_reasoning_score": min_reasoning_score,
+            "min_reward": min_reward if judge_enabled else 1.0,
+            "min_reasoning_score": min_reasoning_score if judge_enabled else None,
             "require_valid_structure": True,
             "require_all_states_correct": True,
             "require_answer_correct": True,
             "require_eos": True,
         },
         "candidate_count": len(scored),
-        "judge_group_count": len(groups) if not rule_only else 0,
+        "judge_group_count": len(groups) if judge_enabled else 0,
         "accepted_count": counters["accepted"],
         "full_reward_count": counters["full_reward"],
         "reward_threshold_count": counters["reward_threshold"],
@@ -322,9 +350,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--manifest", type=Path)
     parser.add_argument(
-        "--rule-only",
+        "--use-judge",
         action="store_true",
-        help="Run deterministic diagnostics without Judge calls; accepts nothing",
+        help="Use external Judge scoring; default is local State+Answer scoring",
     )
     parser.add_argument("--max-workers", type=int, default=8)
     parser.add_argument("--min-reward", type=float, default=DEFAULT_MIN_REWARD)
@@ -347,7 +375,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     scorer = None
-    if not args.rule_only:
+    if args.use_judge:
         judge = DeepSeekJudge(
             JudgeConfig(
                 base_url=args.base_url,
@@ -364,7 +392,6 @@ def main() -> None:
         read_jsonl(args.candidates),
         read_jsonl(args.data) if args.data else None,
         scorer=scorer,
-        rule_only=args.rule_only,
         max_workers=args.max_workers,
         min_reward=args.min_reward,
         min_reasoning_score=args.min_reasoning_score,

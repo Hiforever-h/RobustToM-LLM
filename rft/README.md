@@ -42,38 +42,19 @@ outside the blocks. Markers must begin on a new line.
 
 ## Reward and acceptance
 
-`scripts/reward.py` combines deterministic checks with a packed pointwise LLM
-Judge. For every prompt, all sampled candidates are sent in one Judge request.
-The deterministic part checks structure, every `State`, and the final `Answer`;
-the Judge grades only the natural-language reasoning at each step.
+RFT candidate selection is local and deterministic by default; it makes zero
+LLM Judge requests. The parser from `scripts/reward.py` checks every `State` and
+the final `Answer`. If all are correct, the candidate receives binary reward
+1.0; otherwise it receives 0.0.
 
-With the default weights:
+A reward-1 candidate is accepted only when the complete
+`Think/State/Answer` structure is valid and generation ended normally with EOS.
+Reasoning text is retained for training but is not semantically graded during
+default RFT rejection sampling.
 
-- process reward is 0.8 of the total and answer bonus is 0.2;
-- within each process step, state correctness is weighted 0.4 and Judge
-  reasoning quality is weighted 0.6;
-- reasoning scores may be any finite value in `[0, 1]`; 0, 0.5, and 1 are
-  Judge calibration anchors;
-- a wrong state or missing reasoning gates that step's reasoning score;
-- the answer bonus requires every state and the final answer to be correct.
-
-RFT accepts a candidate only when all conditions hold:
-
-1. combined reward is at least `--min-reward` (default 0.88);
-2. every effective per-step reasoning score is at least
-   `--min-reasoning-score` (default 0.5);
-3. the complete `Think/State/Answer` structure is valid;
-4. every `State` and the final `Answer` are correct;
-5. generation ended normally with EOS.
-
-With the default reward weights and correct states/answer, reward 0.88
-corresponds to an average reasoning score of 0.75. The per-step 0.5 floor stops
-one clearly bad step from being hidden by high scores on the other steps.
-Thresholds change acceptance only; accepted samples keep their actual reward
-and are never rewritten as reward 1.0.
-
-`--rule-only` is a diagnostic mode. It supplies zero Judge reasoning scores and
-therefore intentionally accepts no candidates.
+The previous Judge-backed scorer remains available only as an explicit
+`--use-judge` option. In that optional mode, `--min-reward` defaults to 0.88 and
+every effective step score must meet `--min-reasoning-score` (default 0.5).
 
 ## Environment
 
@@ -89,10 +70,9 @@ python -m pip install -r rft/requirements.txt
 python -m pip install flash-attn==2.6.3 --no-build-isolation  # optional
 ```
 
-Judge scoring reads `DEEPSEEK_API_KEY` from the environment or repository
-`.env`. `DEEPSEEK_BASE_URL` may also be set there. The CLI defaults to model
-`deepseek-v4-flash`, thinking disabled, eight concurrent prompt groups, two
-retries, and a 180-second request timeout.
+Default scoring needs no API key. Optional `--use-judge` scoring reads
+`DEEPSEEK_API_KEY` from the environment or repository `.env`;
+`DEEPSEEK_BASE_URL` may also be set there.
 
 ## Rebuild or validate the fixed split
 
@@ -136,12 +116,7 @@ response, response token IDs, EOS status, prompt hashes, and generation config.
 python -m rft.score_candidates \
   --candidates "runs/rft_sampling/${RUN_ID}/candidates.jsonl" \
   --data data/rft/derived_v3_fewshot/train.jsonl \
-  --output "runs/rft_sampling/${RUN_ID}/scored.jsonl" \
-  --cache-dir "runs/rft_sampling/${RUN_ID}/judge_cache" \
-  --max-workers 8 \
-  --judge-model deepseek-v4-flash \
-  --min-reward 0.88 \
-  --min-reasoning-score 0.5
+  --output "runs/rft_sampling/${RUN_ID}/scored.jsonl"
 
 python -m rft.build_dataset \
   --scored "runs/rft_sampling/${RUN_ID}/scored.jsonl" \
@@ -151,8 +126,9 @@ python -m rft.build_dataset \
   --seed 2026
 ```
 
-The scored JSONL keeps the actual combined score, deterministic rule details,
-Judge step scores, acceptance reason/policy, and Judge metadata for auditing.
+The scored JSONL keeps the binary score, deterministic rule details, acceptance
+reason, and policy for auditing. `judge_score` and `judge_metadata` are null in
+the default mode.
 The dataset builder consumes the resulting `accepted` flag; it does not apply a
 second score policy. It trains only on accepted sampled responses and never
 falls back to a gold response.
@@ -164,17 +140,20 @@ observed/hidden pair coverage is allowed. Optional controls are:
 - `--deduplicate-semantic` to collapse normalized equivalent natural responses;
 - `--require-complete-pairs` to keep only prompts whose pair has both sides.
 
-For a local parser/state diagnostic without API calls:
+Optional Judge scoring must be requested explicitly and can make one request
+per prompt group, so it is not recommended for the full 3,200 x 16 selection
+run:
 
 ```bash
 python -m rft.score_candidates \
   --candidates "runs/rft_sampling/${RUN_ID}/candidates.jsonl" \
   --data data/rft/derived_v3_fewshot/train.jsonl \
-  --output "runs/rft_sampling/${RUN_ID}/rule_only.jsonl" \
-  --rule-only
+  --output "runs/rft_sampling/${RUN_ID}/judged.jsonl" \
+  --use-judge \
+  --cache-dir "runs/rft_sampling/${RUN_ID}/judge_cache" \
+  --min-reward 0.88 \
+  --min-reasoning-score 0.5
 ```
-
-This output is for inspection only and contains no accepted samples.
 
 ## Train
 

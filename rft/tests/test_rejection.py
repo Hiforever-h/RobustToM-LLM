@@ -45,8 +45,6 @@ class FakeJudge:
 
 
 class RejectionTest(unittest.TestCase):
-    scorer = NaturalCoTReward(FakeJudge())
-
     @staticmethod
     def record(side: str, answer: str, pair: str = "pair-1") -> dict:
         sample = f"{pair}-{side}"
@@ -62,7 +60,7 @@ class RejectionTest(unittest.TestCase):
             "intervention_type": side,
         }
 
-    def test_only_full_reward_valid_structure_eos_enters_dataset(self):
+    def test_state_answer_correct_valid_structure_eos_enters_dataset(self):
         rows = []
         for side, answer in (
             ("observed", "linen chest"),
@@ -87,7 +85,9 @@ class RejectionTest(unittest.TestCase):
                 + "\nThis content appears after Answer.",
             }
         )
-        scored, _ = score_candidates(rows, scorer=self.scorer)
+        scored, manifest = score_candidates(rows)
+        self.assertFalse(manifest["judge_enabled"])
+        self.assertEqual(manifest["judge_group_count"], 0)
         output, manifest = build_dataset(scored, min_samples=2, max_samples=3000)
         self.assertEqual(manifest["final_sample_count"], 2)
         self.assertEqual(len(output), 2)
@@ -100,7 +100,7 @@ class RejectionTest(unittest.TestCase):
             "raw_response": response("linen chest"),
             "generation_reached_eos": True,
         }
-        scored, _ = score_candidates([candidate], scorer=self.scorer)
+        scored, _ = score_candidates([candidate])
         output, manifest = build_dataset(scored, min_samples=0)
         self.assertEqual(len(output), 1)
         self.assertEqual(manifest["incomplete_pair_count"], 1)
@@ -124,7 +124,7 @@ class RejectionTest(unittest.TestCase):
             }
             for index in range(3)
         ]
-        scored, _ = score_candidates(rows, scorer=self.scorer)
+        scored, _ = score_candidates(rows)
         output, manifest = build_dataset(
             scored, min_samples=3, max_samples=3
         )
@@ -140,17 +140,42 @@ class RejectionTest(unittest.TestCase):
         self.assertEqual(len(deduplicated), 1)
         self.assertEqual(dedup_manifest["duplicate_candidate_count"], 2)
 
-    def test_rule_only_never_accepts(self):
+    def test_default_local_scoring_assigns_full_reward_without_judge(self):
         record = self.record("observed", "linen chest")
         candidate = {
             **record,
             "raw_response": response("linen chest"),
             "generation_reached_eos": True,
         }
-        scored, manifest = score_candidates([candidate], rule_only=True)
+        scored, manifest = score_candidates([candidate])
+        self.assertTrue(scored[0]["accepted"])
+        self.assertEqual(scored[0]["score"]["reward"], 1.0)
+        self.assertEqual(scored[0]["score"]["scoring_mode"], "state_answer_binary")
+        self.assertIsNone(scored[0]["judge_score"])
+        self.assertEqual(
+            scored[0]["acceptance_reason"],
+            "state_answer_correct_valid_structure_eos",
+        )
+        self.assertFalse(manifest["judge_enabled"])
+
+    def test_default_local_scoring_requires_both_state_and_answer(self):
+        record = self.record("observed", "linen chest")
+        candidate = {
+            **record,
+            "raw_response": (
+                "Think 1:\n"
+                "Alice saw the relevant move and therefore believes this location.\n"
+                "State: archive drawer\n"
+                "Answer: linen chest"
+            ),
+            "generation_reached_eos": True,
+        }
+        scored, _ = score_candidates([candidate])
         self.assertFalse(scored[0]["accepted"])
-        self.assertEqual(scored[0]["acceptance_reason"], "judge_disabled")
-        self.assertTrue(manifest["rule_only"])
+        self.assertEqual(scored[0]["score"]["reward"], 0.0)
+        self.assertFalse(scored[0]["score"]["all_states_correct"])
+        self.assertTrue(scored[0]["score"]["answer_correct"])
+        self.assertEqual(scored[0]["acceptance_reason"], "state_incorrect")
 
     def test_continuous_good_reasoning_does_not_need_full_reward(self):
         record = self.record("observed", "linen chest")
