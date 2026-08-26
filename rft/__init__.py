@@ -1,3 +1,3 @@
-"""Standalone rejection-sampling fine-tuning pipeline for RobustToM-RL."""
+"""Standalone natural-CoT rejection-sampling fine-tuning for RobustToM."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

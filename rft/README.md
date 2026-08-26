@@ -1,97 +1,135 @@
-# Standalone RobustToM-RL RFT
+# Standalone natural-CoT RFT
 
-This directory implements rejection-sampling fine-tuning independently of
-`verl`. It consumes the process-target JSONL files produced by the project and
-exports a standard Hugging Face checkpoint. No canonical `process_response` is
-used as a training completion.
+`rft/` implements rejection-sampling fine-tuning without `verl`. The current
+pipeline consumes `data/counterfactual_process_reward_v4_natural` and uses
+`scripts/reward.py` as the reward implementation. Model responses are natural
+`Think N / State / Answer` text; they are not JSON, and no canonical
+`process_response` is used as training data.
 
-## Pipeline
+`rft/reward.py` remains only for the repository's legacy JSON-reward paths.
+The current RFT preparation, scoring, dataset construction, and evaluation
+commands import the natural-CoT parser/reward from `scripts/reward.py`.
 
-1. `prepare_data` creates the fixed train/dev/test split and validates pairs.
-2. An external vLLM run (or `rft.sample`) writes raw candidates.
-3. `score_candidates` accepts only strict JSON candidates with reward `1.0` and EOS.
-4. `build_dataset` deduplicates by parsed JSON and keeps only complete pairs.
-5. `train` performs response-only causal-LM training: prompt labels are `-100`,
-   and the accepted response plus one EOS are trainable.
-6. `generate` and `evaluate` report process, pair and shortcut-conflict metrics.
+## Data and response format
 
-The dataset builder keeps every full-reward response by default and does not
-require observed/hidden pairs. It never falls back to gold/canonical responses
-when coverage is low. Use `--require-complete-pairs` only for the stricter
-pair-balanced ablation.
+The checked-in RFT split is `data/rft/derived_v3_fewshot`:
+
+- `train.jsonl`: the natural source `train.jsonl` (3,200 examples)
+- `dev.jsonl`: the natural source `val.jsonl` (400 examples), with `split=dev`
+- `test.jsonl`: the natural source `test.jsonl` (600 sealed order-4 examples)
+
+These files contain the same sample IDs, pair IDs, questions, choices, answers,
+and `process_target` values as the previous symbolic-v3 few-shot files. They are
+not an independently sampled dataset. The natural v4 source removes story event
+numbers, supplies the current natural `process_prompt`, adds `judge_prompt`, and
+removes `process_response`, token-count fields, and the old `prompt` field.
+
+The actor response protocol is:
+
+```text
+Think 1:
+<natural-language reasoning for the innermost belief>
+State: <location>
+Think 2:
+<natural-language reasoning for the next outer belief>
+State: <location>
+Answer: <final outermost location>
+```
+
+There must be exactly one numbered block per gold trace step, in order, one
+`State:` per block, one final `Answer:`, no duplicate/extra steps, and no text
+outside the blocks. Markers must begin on a new line.
+
+## Reward and acceptance
+
+`scripts/reward.py` combines deterministic checks with a packed pointwise LLM
+Judge. For every prompt, all sampled candidates are sent in one Judge request.
+The deterministic part checks structure, every `State`, and the final `Answer`;
+the Judge grades only the natural-language reasoning at each step.
+
+With the default weights:
+
+- process reward is 0.8 of the total and answer bonus is 0.2;
+- within each process step, state correctness is weighted 0.4 and Judge
+  reasoning quality is weighted 0.6;
+- reasoning scores are restricted to 0, 0.5, or 1;
+- a wrong state or missing reasoning gates that step's reasoning score;
+- the answer bonus requires every state and the final answer to be correct.
+
+RFT accepts a candidate only when all three conditions hold:
+
+1. combined reward equals 1.0;
+2. the complete `Think/State/Answer` structure is valid;
+3. generation ended normally with EOS.
+
+`--rule-only` is a diagnostic mode. It supplies zero Judge reasoning scores and
+therefore intentionally accepts no candidates.
 
 ## Environment
 
-Run all commands from the repository root on the A800 machine:
+Run from the repository root. GPU sampling/training needs the packages in
+`rft/requirements.txt`; the reward implementation itself uses the standard
+library.
 
 ```bash
 conda create -n robusttom-rft python=3.10 -y
 conda activate robusttom-rft
-
 python -m pip install --upgrade pip setuptools wheel
 python -m pip install -r rft/requirements.txt
-python -m pip install flash-attn==2.6.3 --no-build-isolation
+python -m pip install flash-attn==2.6.3 --no-build-isolation  # optional
 ```
 
-`flash-attn` is optional. If it is unavailable, `rft.train` automatically
-falls back to the Transformers attention implementation.
+Judge scoring reads `DEEPSEEK_API_KEY` from the environment or repository
+`.env`. `DEEPSEEK_BASE_URL` may also be set there. The CLI defaults to model
+`deepseek-v4-flash`, thinking disabled, eight concurrent prompt groups, two
+retries, and a 180-second request timeout.
 
-## Prepare the fixed split
+## Rebuild or validate the fixed split
 
-The derived files are already present in the repository. Regenerate and
-validate them when the source JSONL changes:
+`rft.prepare_data` refuses to overwrite an existing output directory. Use a
+fresh path when auditing a rebuild:
 
 ```bash
 python -m rft.prepare_data \
-  --input-dir data/counterfactual_process_reward \
-  --output-dir data/rft/derived \
-  --seed 2026
+  --input-dir data/counterfactual_process_reward_v4_natural \
+  --output-dir /tmp/derived_v4_natural_audit
 ```
 
-## Existing candidates
+The command verifies natural prompt/version fields, absence of
+`process_response`, target/answer agreement, complete observed/hidden pairs,
+and split isolation. It maps source `val` to RFT `dev` without resampling.
 
-If candidates have already been sampled, point `rft/run_rft.sh` at that JSONL:
-
-```bash
-CANDIDATES=/path/to/candidates.jsonl bash rft/run_rft.sh
-```
-
-Candidate rows must contain `global_sample_id`, `generation_reached_eos`, and
-one of `raw_response`, `response`, or `accepted_response`. They may either
-contain `process_target` and metadata or use `--data` to resolve those fields
-by sample ID. Missing EOS status is rejected rather than assumed successful.
-
-## One-time sampling
-
-For a new one-time vLLM run:
+## Sample candidates
 
 ```bash
-RUN_ID=20260819-qwen25-3b-k16
+RUN_ID=20260826-qwen25-3b-natural-k16
 MODEL=Qwen/Qwen2.5-3B-Instruct
 
 CUDA_VISIBLE_DEVICES=0 python -m rft.sample \
-  --data data/rft/derived/train.jsonl \
+  --data data/rft/derived_v3_fewshot/train.jsonl \
   --model "${MODEL}" \
   --output "runs/rft_sampling/${RUN_ID}/candidates.jsonl" \
   --num-samples 16 \
   --temperature 0.8 \
   --top-p 0.95 \
-  --max-new-tokens 256 \
+  --max-new-tokens 384 \
   --gpu-memory-utilization 0.85 \
   --seed 2026
 ```
 
-The sampler applies the Qwen chat template exactly once and persists raw
-responses, token IDs, stop reason, prompt hashes and generation parameters.
-This command is one pass over 3,080 prompts and produces 49,280 raw candidates.
+The sampler applies the tokenizer's chat template once and records the raw
+response, response token IDs, EOS status, prompt hashes, and generation config.
 
 ## Score and build the accepted dataset
 
 ```bash
 python -m rft.score_candidates \
   --candidates "runs/rft_sampling/${RUN_ID}/candidates.jsonl" \
-  --data data/rft/derived/train.jsonl \
-  --output "runs/rft_sampling/${RUN_ID}/scored.jsonl"
+  --data data/rft/derived_v3_fewshot/train.jsonl \
+  --output "runs/rft_sampling/${RUN_ID}/scored.jsonl" \
+  --cache-dir "runs/rft_sampling/${RUN_ID}/judge_cache" \
+  --max-workers 8 \
+  --judge-model deepseek-v4-flash
 
 python -m rft.build_dataset \
   --scored "runs/rft_sampling/${RUN_ID}/scored.jsonl" \
@@ -101,11 +139,28 @@ python -m rft.build_dataset \
   --seed 2026
 ```
 
-Only responses with process reward `1.0`, strict JSON format and a normal EOS
-are accepted. By default all accepted trajectories are retained, up to
-`--max-samples`; observed and hidden sides may be incomplete. Add
-`--deduplicate-semantic` to collapse equivalent JSON responses, or add
-`--require-complete-pairs` for the previous pair-balanced behavior.
+The scored JSONL keeps the combined score, deterministic rule details, Judge
+step scores, and Judge metadata for auditing. The dataset builder trains only
+on accepted sampled responses and never falls back to a gold response.
+
+By default, every accepted trajectory is eligible and incomplete
+observed/hidden pair coverage is allowed. Optional controls are:
+
+- `--max-candidates-per-prompt N` to cap trajectories per prompt;
+- `--deduplicate-semantic` to collapse normalized equivalent natural responses;
+- `--require-complete-pairs` to keep only prompts whose pair has both sides.
+
+For a local parser/state diagnostic without API calls:
+
+```bash
+python -m rft.score_candidates \
+  --candidates "runs/rft_sampling/${RUN_ID}/candidates.jsonl" \
+  --data data/rft/derived_v3_fewshot/train.jsonl \
+  --output "runs/rft_sampling/${RUN_ID}/rule_only.jsonl" \
+  --rule-only
+```
+
+This output is for inspection only and contains no accepted samples.
 
 ## Train
 
@@ -126,178 +181,60 @@ CUDA_VISIBLE_DEVICES=0 python -m rft.train \
   --seed 2026
 ```
 
-Before loading the model, training writes `token_length_report.json`. If any
-sample exceeds 2,048 tokens, the command fails instead of truncating the story;
-rerun with `--max-seq-length 4096`. The standard Hugging Face checkpoint is
-written to `runs/rft_train/${RUN_ID}/final`.
+Training masks every prompt token and optimizes only the accepted response plus
+one EOS. It writes `token_length_report.json` before model loading and fails on
+overlength samples rather than truncating them. The final Hugging Face
+checkpoint is written under `<output-dir>/final`.
 
-TensorBoard records `loss`, `grad_norm`, `learning_rate` and `epoch` every 10
-optimizer steps. Start it in another terminal on the training machine:
+## Evaluate
 
-```bash
-conda activate robusttom-rft
-tensorboard \
-  --logdir "runs/rft_train/${RUN_ID}/tensorboard" \
-  --host 127.0.0.1 \
-  --port 6006
-```
-
-For a remote A800 server, forward the port from your local machine:
-
-```bash
-ssh -L 6006:127.0.0.1:6006 <user>@<a800-host>
-```
-
-Then open `http://127.0.0.1:6006`. Use `--logging-steps 1` for a short smoke
-run where per-step visibility is more useful than lower logging overhead.
-
-## Evaluation
+Generate on `dev` during model selection:
 
 ```bash
 python -m rft.generate \
-  --data data/rft/derived/dev.jsonl \
+  --data data/rft/derived_v3_fewshot/dev.jsonl \
   --model "runs/rft_train/${RUN_ID}/final" \
-  --output "runs/rft_eval/${RUN_ID}/dev_predictions.jsonl"
+  --output "runs/rft_eval/${RUN_ID}/dev_predictions.jsonl" \
+  --max-new-tokens 384
+```
 
+Deterministic evaluation makes no Judge call and reports structure, reasoning
+presence, per-step/all-state accuracy, answer accuracy, pair and shortcut
+metrics. Its `mean_process_reward` is the rule-only combined score, so correct
+reasoning receives no Judge credit and a completely correct structure/state/
+answer response has a rule-only score of 0.52.
+
+```bash
 python -m rft.evaluate \
   --predictions "runs/rft_eval/${RUN_ID}/dev_predictions.jsonl" \
-  --data data/rft/derived/dev.jsonl \
-  --output "runs/rft_eval/${RUN_ID}/dev_metrics.json"
+  --data data/rft/derived_v3_fewshot/dev.jsonl \
+  --output "runs/rft_eval/${RUN_ID}/dev_rule_metrics.json"
 ```
 
-Sealed order-4 test data must only be evaluated after model/config selection is
-complete. The metrics include strict format, full process reward, answer and
-core-state accuracy, pair accuracy, intervention sensitivity, shortcut-copy
-rate, last-mention-copy rate, answer-state consistency, EOS rate and p95 length.
-
-## Hi-ToM order-4 answer-only benchmark
-
-Build the 600-example Hi-ToM order-4 benchmark from the checked-in source CSV:
-
-```bash
-python -m rft.prepare_hitom_eval \
-  --input data/cleaned_tom/raw/hi_tom_3000.csv \
-  --output-dir data/rft/hitom_order4 \
-  --order 4 \
-  --expected-count 600
-```
-
-As in the symbolic-v3 data, every event in the Hi-ToM `story` field and in the
-corresponding `Story:` prompt section is written on its own line with a
-one-based `1`, `2`, `3`, ... prefix.
-
-The builder calls `build_grpo_prompt`, so every benchmark prompt contains the
-same fixed order-1/2/3 few-shot block used by symbolic v3 and exactly one copy
-of the following clarification:
-
-```text
-tom_order is exactly the number of names in belief_chain, not the number of story events. belief_trace contains exactly tom_order entries.
-```
-
-Generate the model responses without changing the existing generation CLI:
-
-```bash
-python -m rft.generate \
-  --data data/rft/hitom_order4/test.jsonl \
-  --model runs/grpo/qwen25_3b_rft_grpo_n16_seed2026/final \
-  --output runs/hitom_order4/grpo_predictions.jsonl \
-  --max-new-tokens 384 \
-  --seed 2026
-```
-
-Score only the final JSON `answer`. Malformed JSON, a missing `answer`, and a
-prediction/data ID mismatch cannot receive credit. The intermediate Hi-ToM
-belief trace is generated by the model but is intentionally not scored because
-the source dataset provides only final-answer labels.
+Add `--judge` for the true combined reward and full-reward rate:
 
 ```bash
 python -m rft.evaluate \
-  --predictions runs/hitom_order4/grpo_predictions.jsonl \
-  --data data/rft/hitom_order4/test.jsonl \
-  --output runs/hitom_order4/grpo_metrics.json \
-  --answer-only
+  --predictions "runs/rft_eval/${RUN_ID}/dev_predictions.jsonl" \
+  --data data/rft/derived_v3_fewshot/dev.jsonl \
+  --output "runs/rft_eval/${RUN_ID}/dev_judged_metrics.json" \
+  --judge \
+  --cache-dir "runs/rft_eval/${RUN_ID}/judge_cache" \
+  --max-workers 8
 ```
 
-## Official Hugging Face Hi-ToM release
+Keep the order-4 `test.jsonl` sealed until model and configuration selection is
+complete. `--answer-only` accepts either the current `Answer:` marker or a
+legacy JSON `answer`, which keeps the external answer-only benchmark utilities
+usable.
 
-After downloading `Hi-ToM/Hi-ToM_Dataset` into `data/Hi-ToM`, convert the
-official JSON with:
+## One-command continuation from existing candidates
 
-```bash
-python -m rft.prepare_hitom_hf \
-  --input data/Hi-ToM/Hi-ToM_data.json \
-  --output-dir data/Hi-ToM \
-  --expected-source-count 1200
-```
-
-The source contains 600 underlying tasks represented once as CoTP and once as
-VP. `data/Hi-ToM/all_prompt_variants.jsonl` preserves all 1,200 source rows,
-`data/Hi-ToM/test.jsonl` selects the 600 CoTP rows to avoid double weighting,
-and `data/Hi-ToM/order4_test.jsonl` contains the 120 fourth-order examples.
-The conflict-free counterparts are `data/Hi-ToM/consistent_test.jsonl` with
-462 rows and `data/Hi-ToM/order4_consistent_test.jsonl` with 65 rows.
-
-The official source has 138 duplicated CoTP/VP task pairs whose answer labels
-disagree. They are recorded in `data/Hi-ToM/label_conflicts.jsonl`, and each
-converted example exposes `source_label_conflict`. The recommended files retain
-the upstream CoTP labels rather than silently changing labels.
-
-For the model described here, use `data/Hi-ToM/order4_consistent_test.jsonl`
-when label consistency matters more than benchmark size. Use `order4_test.jsonl`
-for the complete upstream CoTP fourth-order split. Both use the same generation
-CLI and final-answer-only score:
+`run_rft.sh` starts from an existing candidate file, scores with the Judge,
+builds accepted data, and trains. It does not resample or fabricate completions.
 
 ```bash
-python -m rft.generate \
-  --data data/Hi-ToM/order4_consistent_test.jsonl \
-  --model runs/grpo/qwen25_3b_rft_grpo_n16_seed2026/final \
-  --output runs/hitom_hf_order4/predictions.jsonl \
-  --max-new-tokens 384 \
-  --seed 2026
-
-python -m rft.evaluate \
-  --predictions runs/hitom_hf_order4/predictions.jsonl \
-  --data data/Hi-ToM/order4_consistent_test.jsonl \
-  --output runs/hitom_hf_order4/metrics.json \
-  --answer-only
-```
-
-## Official Hugging Face ExploreToM sample
-
-Convert the downloaded `facebook/ExploreToM` CSV with:
-
-```bash
-python -m rft.prepare_exploretom_hf \
-  --input data/ExploreToM/ExploreToM-data-sample.csv \
-  --output-dir data/ExploreToM \
-  --expected-source-count 13309
-```
-
-The publisher describes this as a Llama-3.1-70B-targeted adversarial sample and
-explicitly says it is not the canonical ExploreToM test set. It contains only
-first- and second-order questions. The converter selects container-location
-ToM questions, uses the structured story representation, numbers every event,
-and derives deterministic choices from containers used for the queried object.
-
-`data/ExploreToM/all_container_questions.jsonl` preserves all 1,485 matching
-rows. The recommended `data/ExploreToM/test.jsonl` has 1,053 rows after removing
-non-unique mental-state questions, one-candidate shortcuts, and exact duplicate
-tasks. Its order-specific subsets are `order1_test.jsonl` with 422 rows and
-`order2_test.jsonl` with 631 rows.
-
-Generate and evaluate the recommended second-order subset with:
-
-```bash
-python -m rft.generate \
-  --data data/ExploreToM/order2_test.jsonl \
-  --model runs/grpo/qwen25_3b_rft_grpo_n16_seed2026/final \
-  --output runs/exploretom_hf_order2/predictions.jsonl \
-  --max-new-tokens 384 \
-  --seed 2026
-
-python -m rft.evaluate \
-  --predictions runs/exploretom_hf_order2/predictions.jsonl \
-  --data data/ExploreToM/order2_test.jsonl \
-  --output runs/exploretom_hf_order2/metrics.json \
-  --answer-only
+CANDIDATES=/path/to/candidates.jsonl \
+RUN_ID=20260826-natural-rft \
+bash rft/run_rft.sh
 ```

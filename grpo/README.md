@@ -1,70 +1,274 @@
-# RobustToM v3 GRPO
+# RobustToM natural-CoT GRPO
 
-This directory contains the task-specific adapter and reward integration for
-training `runs/final` with the bundled verl implementation. The scorer is
-imported directly from `rft.reward`; the RFT implementation is not modified.
+本目录是 RobustToM 的 GRPO 训练入口。当前主链路不再要求 actor 输出 JSON 或
+`belief_chain`，而是输出轻量自然语言过程：
 
-Create the independent RL environment on the A800 host:
+```text
+Think 1:
+Henry privately saw the flashlight move to blue_canvas_bag.
+State: blue_canvas_bag
+
+Think 2:
+Thomas did not observe Henry's later private update.
+State: ceramic_jar
+
+Answer: ceramic_jar
+```
+
+训练时，每个 prompt 采样 16 条 response。本地规则负责检查 Think 数量、每步
+`State` 和最终 `Answer`；`deepseek-v4-flash` 只评价每步 reasoning。一个 prompt
+及其 16 条 response 被打包为一次 Judge 请求，默认一个训练 step 的 8 个请求并发执行。
+
+旧版 JSON/few-shot 实验仍可通过 `grpo/run_grpo_json_v3.sh` 复现；
+`grpo/run_grpo_v3.sh` 现在是 natural-CoT 脚本的兼容别名。
+
+## 1. 运行环境
+
+正式训练要求：
+
+- Linux x86_64；
+- NVIDIA CUDA 12.1；
+- Python 3.10；
+- PyTorch 2.4.0、vLLM 0.6.3；
+- 建议使用 A800 或同等级 GPU。
+
+在项目根目录创建环境：
 
 ```bash
-conda create -n robusttom-grpo python=3.10 -y
-conda activate robusttom-grpo
+conda create -n robusttom python=3.10 pip -y
+conda activate robusttom
 python -m pip install --upgrade pip setuptools wheel
-python -m pip install torch==2.4.0
+python -m pip install torch==2.4.0 --index-url https://download.pytorch.org/whl/cu121
 python -m pip install -r requirements.txt
 python -m pip install flash-attn==2.7.0.post2 --no-build-isolation
 python -m pip install -e . --no-deps
-wandb login
+```
+
+根目录 `requirements.txt` 是 Linux/CUDA 训练清单。macOS 不支持其中的 vLLM、
+xFormers 和 flash-attn；macOS 环境只适合构建数据、调试 Judge/RewardManager 和运行单测，
+不能执行下面的 validate/smoke/pilot/train trainer 模式。
+
+## 2. 环境变量
+
+下面是一套 A800 主机示例。路径可以按机器实际情况修改：
+
+```bash
+conda activate robusttom
+
+export RFT_MODEL_PATH=/root/autodl-tmp/runs/rft_train/20260820-qwen25-3b-k16/final
+export RAW_DATA_DIR=/root/RobustToM-LLM/data/counterfactual_process_reward_v3
+export NATURAL_SOURCE_DIR=/root/autodl-tmp/data/counterfactual_process_reward_v4_natural
+export GRPO_DATA_DIR=/root/autodl-tmp/data/grpo/counterfactual_process_reward_v4_natural
+export GRPO_OUTPUT_ROOT=/root/autodl-tmp/runs/grpo
+export GRPO_LOG_DIR=/root/autodl-tmp/runs/grpo/logs
+
 export HF_HOME=/root/autodl-tmp/huggingface
 export HF_HUB_CACHE=/root/autodl-tmp/huggingface/hub
-export TMPDIR=/root/autodl-tmp/tmp
 export HF_ENDPOINT=https://hf-mirror.com
-export RFT_MODEL_PATH=/root/autodl-tmp/runs/rft_train/20260820-qwen25-3b-k16/final
-export RAW_DATA_DIR=/root/RobustToM-RL/data/counterfactual_process_reward_v3
-
-export GRPO_RUN_DIR=/root/autodl-tmp/runs/grpo/qwen25_3b_rft_grpo_n16_seed2026
-export GRPO_DATA_DIR=/root/autodl-tmp/data/grpo/counterfactual_process_reward_v3_fewshot
-export GRPO_LOG_DIR="${GRPO_RUN_DIR}/logs"
-
-export WANDB_DIR="${GRPO_RUN_DIR}/wandb"
+export WANDB_DIR=/root/autodl-tmp/wandb
 export WANDB_CACHE_DIR=/root/autodl-tmp/cache/wandb
 export RAY_TMPDIR=/root/autodl-tmp/tmp/ray
 export TMPDIR=/root/autodl-tmp/tmp
-RUN_ID=20260822-qwen25-3b-k16
-MODEL=Qwen/Qwen2.5-3B-Instruct
 ```
 
-The main configuration logs to both the terminal and Weights & Biases under
-project `robust_tom_grpo_v3`. Set `WANDB_API_KEY` non-interactively on a remote
-host, or use `WANDB_MODE=offline` when outbound network access is unavailable.
+Judge 默认读取项目根目录 `.env`：
 
-Build the audited parquet files:
+```dotenv
+DEEPSEEK_API_KEY=your-key
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+```
+
+也可以直接导出 `DEEPSEEK_API_KEY`。不要把 key 写进 yaml、shell 脚本或训练日志。
+
+如果不使用在线 W&B：
 
 ```bash
-bash grpo/run_grpo_v3.sh build
+export WANDB_MODE=offline
 ```
 
-Run the A800 checks in order:
+## 3. 数据构建
+
+执行：
 
 ```bash
-bash grpo/run_grpo_v3.sh validate
-bash grpo/run_grpo_v3.sh smoke
-bash grpo/run_grpo_v3.sh pilot
-bash grpo/run_grpo_v3.sh train
+bash grpo/run_grpo_natural.sh build
 ```
 
-The main run uses 8 prompts per step, 16 rollouts per prompt, 800 optimizer
-steps, two epochs, a learning rate of `5e-7`, temperature `1.0`, and asymmetric
-PPO clipping with ratio bounds `[0.8, 1.3]`.
+该命令会：
 
-Resume from an actor checkpoint without changing the frozen reference:
+1. 从 `RAW_DATA_DIR` 读取 v3 train/val/test JSONL；
+2. 删除旧 `process_response`、JSON schema、few-shot、事件编号和 prompt 中的实际换行；
+3. 生成 natural-CoT source JSONL 到 `NATURAL_SOURCE_DIR`；
+4. 生成 verl parquet 到 `GRPO_DATA_DIR`；
+5. 在 parquet 中显式保存 `judge_prompt` 和隐藏的结构化 process target；
+6. 使用 `RFT_MODEL_PATH` 的 tokenizer 审计 prompt 长度。
+
+仓库当前已包含一份构建结果：
+
+```text
+data/counterfactual_process_reward_v4_natural/
+data/grpo/counterfactual_process_reward_v4_natural/
+```
+
+## 4. 推荐执行顺序
 
 ```bash
-bash grpo/run_grpo_v3.sh train \
-  trainer.resume_from_path=runs/grpo/qwen25_3b_rft_grpo_n16_seed2026/actor/global_step_400
+bash grpo/run_grpo_natural.sh validate
+bash grpo/run_grpo_natural.sh smoke
+bash grpo/run_grpo_natural.sh pilot
+bash grpo/run_grpo_natural.sh train
 ```
 
-## 2026-08-21 RFT 与 GRPO 评测结论
+### 4.1 validate：规则验证，不请求 Judge
+
+```bash
+bash grpo/run_grpo_natural.sh validate
+```
+
+行为：
+
+- `trainer.val_only=true`；
+- 对整个 val split 做 deterministic generation；
+- 只计算 Think 结构、State、Answer、EOS、shortcut conflict 等本地指标；
+- 不调用 DeepSeek；
+- 不计算梯度，不执行 optimizer update，不保存 checkpoint；
+- logger 强制为 console。
+
+主要关注：
+
+```text
+val/overall/structure_valid_rate
+val/overall/state_step_accuracy
+val/overall/all_states_correct_rate
+val/overall/answer_accuracy
+val/overall/answer_correct_state_trace_wrong_rate
+```
+
+validate 的意义是确认 checkpoint 能在新 prompt 下产生可解析的 natural-CoT。如果
+`structure_valid_rate` 很低，应先处理格式迁移，不要直接进入完整 GRPO。
+
+### 4.2 smoke：一次真实 Judge + optimizer update
+
+```bash
+bash grpo/run_grpo_natural.sh smoke
+```
+
+固定缩小为：
+
+```text
+1 prompt × 2 rollouts × 1 optimizer step
+1 个并发 Judge worker
+无 validation、无 checkpoint、仅 console logger
+```
+
+smoke 会真实执行：模型采样、packed Judge 请求、本地规则门控、reward 回填、GRPO
+advantage、actor update。启动前 preflight 会验证：
+
+- `DEEPSEEK_API_KEY`；
+- `https://api.deepseek.com/chat/completions`；
+- `deepseek-v4-flash` 是否位于 `/models` 返回列表；
+- Judge cache 目录是否可写。
+
+smoke 通过标准是进程完成一个 optimizer step，并出现非空的 reward/Judge 指标。
+
+### 4.3 pilot：短程生产形状实验
+
+```bash
+bash grpo/run_grpo_natural.sh pilot
+```
+
+pilot 使用与正式训练相同的 `8 prompts × 16 rollouts`，但只跑 50 个 optimizer
+steps。每 10 步执行 rule-only validation，每 25 步保存 checkpoint，并在结束时保存和验证。
+
+建议重点检查：
+
+```text
+reward/structure_valid_rate
+reward/state_step_accuracy
+reward/judge_reasoning_step_mean
+reward/answer_correct_process_imperfect_rate
+reward/judge/latency_mean_seconds
+reward/judge/latency_max_seconds
+reward/judge/total_tokens
+grpo/group_reward_std_mean
+grpo/zero_variance_group_rate
+```
+
+进入正式训练前建议满足：
+
+- response 格式可解析率稳定；
+- 大部分 group 的 reward 不是零方差；
+- Judge latency 和 token 成本可接受；
+- 没有持续的 schema normalization、认证失败或限流重试；
+- `answer correct / process imperfect` 没有持续恶化。
+
+### 4.4 train：完整训练
+
+```bash
+bash grpo/run_grpo_natural.sh train
+```
+
+默认配置位于 `verl/trainer/config/robust_tom_natural_grpo.yaml`：
+
+| 参数 | 默认值 |
+| --- | ---: |
+| train batch | 8 prompts |
+| rollout.n | 16 |
+| 每步 response | 128 |
+| Judge 并发 | 8 |
+| max response length | 384 |
+| optimizer steps | 800 |
+| epochs | 2 |
+| learning rate | 5e-7 |
+| save frequency | 400 |
+| rule-only validation frequency | 50 |
+
+Judge 或网络错误在重试耗尽后会让当前训练安全失败，不会把基础设施故障转换成
+全零 reward 后继续更新。
+
+## 5. Hydra 覆盖与恢复训练
+
+所有额外参数都会原样转发给 Hydra。例如只跑 100 步：
+
+```bash
+bash grpo/run_grpo_natural.sh train \
+  trainer.total_epochs=1 \
+  trainer.total_training_steps=100 \
+  trainer.save_freq=50
+```
+
+从 actor checkpoint 恢复：
+
+```bash
+bash grpo/run_grpo_natural.sh train \
+  trainer.resume_from_path=/root/autodl-tmp/runs/grpo/qwen25_3b_natural_cot_judge_n16_seed2026/actor/global_step_400
+```
+
+`RFT_MODEL_PATH` 仍然作为 frozen reference；`resume_from_path` 只替换待继续训练的 actor。
+
+查看脚本帮助：
+
+```bash
+bash grpo/run_grpo_natural.sh help
+```
+
+## 6. 输出目录
+
+默认输出：
+
+```text
+runs/grpo/<experiment_name>/
+runs/grpo/logs/<experiment_name>.log
+runs/grpo/<experiment_name>/judge_cache/
+```
+
+Judge cache key 包含 endpoint、模型、rubric、prompt、target 和全部候选 response，
+但不包含训练 step uid。因此相同请求跨恢复或重跑时可以复用，cache hit 不计入当次
+billable token 指标。
+
+---
+
+## Legacy：2026-08-21 JSON RFT 与 GRPO 评测结论
 
 评测产物位于
 [`runs/20260821-qwen25-3b-k16`](../runs/20260821-qwen25-3b-k16)。RFT 和

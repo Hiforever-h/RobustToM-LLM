@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sample raw candidates with vLLM; this module never imports ``verl``."""
+"""Sample raw Think/State/Answer candidates with vLLM, independently of verl."""
 
 from __future__ import annotations
 
@@ -64,6 +64,8 @@ def sample_with_vllm(
                     "global_pair_id": row.get("global_pair_id"),
                     "process_target": row["process_target"],
                     "process_prompt": row["process_prompt"],
+                    "judge_prompt": row.get("judge_prompt"),
+                    "process_prompt_version": row.get("process_prompt_version"),
                     "prompt_sha256": sha256_text(row["process_prompt"]),
                     "formatted_prompt_sha256": sha256_text(
                         format_chat_prompt(tokenizer, row["process_prompt"])
@@ -105,7 +107,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-samples", type=int, default=16)
     parser.add_argument("--temperature", type=float, default=0.8)
     parser.add_argument("--top-p", type=float, default=0.95)
-    parser.add_argument("--max-new-tokens", type=int, default=256)
+    parser.add_argument("--max-new-tokens", type=int, default=384)
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--tensor-parallel-size", type=int, default=1)
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.85)

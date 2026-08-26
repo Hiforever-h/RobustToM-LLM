@@ -1,4 +1,7 @@
-"""Deterministic process scorer used by sampling, training-data construction and eval."""
+"""Legacy deterministic JSON scorer retained for backward compatibility.
+
+The current natural-CoT RFT pipeline uses :mod:`scripts.reward` directly.
+"""
 
 from __future__ import annotations
 

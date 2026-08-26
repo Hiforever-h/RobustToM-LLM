@@ -47,6 +47,17 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(overall["correct_count"], 0)
         self.assertEqual(overall["answer_accuracy"], 0.0)
 
+    def test_answer_only_accepts_natural_answer_marker(self):
+        data = [{"global_sample_id": "sample-1", "answer": "blue_pantry"}]
+        predictions = [
+            {
+                "global_sample_id": "sample-1",
+                "response": "Think 1:\nA reason.\nState: blue_pantry\nAnswer: Blue Pantry",
+            }
+        ]
+        overall = evaluate_answer_predictions(predictions, data)["overall"]
+        self.assertEqual(overall["answer_accuracy"], 1.0)
+
     def test_answer_only_rejects_id_mismatch_and_duplicates(self):
         data = [{"global_sample_id": "sample-1", "gold_answer": "blue_pantry"}]
         with self.assertRaisesRegex(ValueError, "sample IDs differ"):
@@ -140,6 +151,38 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(overall["answer_state_consistency"], 1.0)
         self.assertEqual(overall["pair_accuracy"], 1.0)
         self.assertEqual(overall["intervention_sensitivity"], 1.0)
+
+    def test_natural_response_reports_structure_state_and_answer_metrics(self):
+        target = {
+            "tom_order": 1,
+            "belief_chain": ["Alice"],
+            "object": "passport",
+            "reasoning_mode": "nested_belief",
+            "belief_trace": [
+                {"belief_chain": ["Alice"], "location": "blue_pantry"}
+            ],
+            "answer": "blue_pantry",
+        }
+        rows = [
+            {
+                "global_sample_id": "natural-1",
+                "global_pair_id": "natural-pair-1",
+                "process_prompt_version": "natural-cot-think-state-v1",
+                "process_target": target,
+                "response": (
+                    "Think 1:\nAlice observed the move.\n"
+                    "State: blue_pantry\nAnswer: blue_pantry"
+                ),
+                "generation_reached_eos": True,
+            }
+        ]
+        overall = evaluate_predictions(rows)["overall"]
+        self.assertEqual(overall["strict_format_rate"], 1.0)
+        self.assertEqual(overall["reasoning_present_rate"], 1.0)
+        self.assertEqual(overall["core_state_accuracy"], 1.0)
+        self.assertEqual(overall["answer_accuracy"], 1.0)
+        self.assertEqual(overall["judge_scored_count"], 0)
+        self.assertEqual(overall["mean_process_reward"], 0.52)
 
 
 if __name__ == "__main__":

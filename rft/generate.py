@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate deterministic process responses for RFT evaluation."""
+"""Generate deterministic Think/State/Answer responses for RFT evaluation."""
 
 from __future__ import annotations
 
@@ -118,7 +118,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--revision")
-    parser.add_argument("--max-new-tokens", type=int, default=256)
+    parser.add_argument("--max-new-tokens", type=int, default=384)
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.45)
     parser.add_argument("--backend", choices=("vllm", "transformers"), default="vllm")

@@ -10,27 +10,42 @@ from pathlib import Path
 from typing import Any
 
 from rft.common import canonical_json, pair_id, read_jsonl, sample_id, sha256_file, stable_hash, write_jsonl
-from rft.reward import normalize
+from scripts.reward import normalize, score_rule_components
 
 
 def _prediction_key(row: dict[str, Any]) -> str:
     response = row.get("raw_response") or row.get("response") or row.get("accepted_response")
     if not isinstance(response, str):
         raise ValueError(f"Accepted row has no response: {row.get('candidate_id', sample_id(row))}")
-    try:
-        parsed = json.loads(response)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Accepted response is not JSON: {row.get('candidate_id', sample_id(row))}") from exc
-    def normalized(value: Any) -> Any:
-        if isinstance(value, str):
-            return normalize(value)
-        if isinstance(value, list):
-            return [normalized(item) for item in value]
-        if isinstance(value, dict):
-            return {key: normalized(item) for key, item in value.items()}
-        return value
-
-    return canonical_json(normalized(parsed))
+    target = row.get("process_target")
+    if isinstance(target, str):
+        target = json.loads(target)
+    if not isinstance(target, dict):
+        raise ValueError(
+            f"Accepted row has no process_target: "
+            f"{row.get('candidate_id', sample_id(row))}"
+        )
+    rule = row.get("rule_score")
+    if not isinstance(rule, dict):
+        rule = score_rule_components(response, target)
+    parsed = rule["parsed"]
+    semantic = {
+        "steps": [
+            {
+                "index": step["index"],
+                "reasoning": normalize(step["reasoning"]),
+                "state": normalize(step["state"]) if step.get("state") else None,
+                "state_count": step["state_count"],
+                "content_after_state": step["content_after_state"],
+            }
+            for step in parsed["steps"]
+        ],
+        "answer": normalize(parsed["answer"]) if parsed.get("answer") else None,
+        "answer_count": parsed["answer_count"],
+        "orphan_state_count": parsed["orphan_state_count"],
+        "orphan_content": [normalize(value) for value in parsed["orphan_content"]],
+    }
+    return canonical_json(semantic)
 
 
 def _candidate_sort_key(row: dict[str, Any]) -> tuple[int, int, str]:
@@ -196,7 +211,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--deduplicate-semantic",
         action="store_true",
-        help="Collapse responses with the same normalized JSON before selecting candidates",
+        help="Collapse equivalent normalized Think/State/Answer responses before selection",
     )
     return parser.parse_args()
 
