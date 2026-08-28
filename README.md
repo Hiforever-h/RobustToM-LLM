@@ -17,20 +17,18 @@
 
 模型输出格式如下：
 
-```json
-{
-  "tom_order": 4,
-  "belief_chain": ["William", "Alice", "Phoebe", "Jacob"],
-  "object": "passport",
-  "reasoning_mode": "nested_belief",
-  "belief_trace": [
-    {"belief_chain": ["Jacob"], "location": "filing_cabinet"},
-    {"belief_chain": ["Phoebe", "Jacob"], "location": "glass_case"},
-    {"belief_chain": ["Alice", "Phoebe", "Jacob"], "location": "blue_canvas_bag"},
-    {"belief_chain": ["William", "Alice", "Phoebe", "Jacob"], "location": "cedar_chest"}
-  ],
-  "answer": "cedar_chest"
-}
+```
+Think 1:
+Henry privately saw the flashlight move to blue_canvas_bag, so he believes it is there.
+State: blue_canvas_bag
+Think 2:
+Thomas saw Henry observe the move to ceramic_jar, but did not see Henry's later private feed.
+Therefore Thomas believes Henry thinks it is in ceramic_jar.
+State: ceramic_jar
+Think 3:
+...
+State: brass_locker
+Answer: brass_locker
 ```
 
 ## 数据
@@ -48,11 +46,9 @@ Symbolic 数据中的 `observed` 和 `hidden` 样本按 pair 组织。训练集�
 
 主要数据目录：
 
-- `data/counterfactual_process_reward_v3_fewshot/`：结构化 JSONL 与固定 3-shot。
-- `data/grpo/counterfactual_process_reward_v3_fewshot/`：GRPO 使用的 parquet。
+- `data/counterfactual_process_reward_v4_natural/`：CoT数据集。
 - `data/rft/derived_v3_fewshot/`：RFT 使用的固定 split。
 - `data/rft/hitom_order4/`：Hi-ToM 四阶 answer-only benchmark。
-- `data/ExploreToM/`：处理后的 ExploreToM benchmark。
 
 ## 最终评测结果
 
@@ -69,7 +65,7 @@ checkpoint，以及从 RFT checkpoint 继续训练得到的 GRPO checkpoint。
 | Hi-ToM benchmark | 600 | 36.33% | 38.00% | **44.50%** |
 | ExploreToM benchmark | 1,053 | 38.22% | 41.31% | **46.06%** |
 
-Hi-ToM 和 ExploreToM benchmark 只比较模型 JSON 中的最终 `answer` 与
+Hi-ToM 和 ExploreToM benchmark 只比较模型 的最终 `answer` 与
 `gold_answer`；不对官方数据未提供的中间 belief trace 计分。
 
 ### Process Metrics
@@ -106,14 +102,11 @@ Hi-ToM 和 ExploreToM benchmark 只比较模型 JSON 中的最终 `answer` 与
 
 | 组件 | 权重 |
 | --- | ---: |
-| 严格 JSON 与 schema | 0.05 |
-| `tom_order` | 0.05 |
-| `belief_chain` | 0.10 |
-| `object` | 0.05 |
-| `belief_trace` | 0.55 |
 | 最终 `answer` | 0.20 |
+| `belief_trace` | 0.48 |
+| statues | 0.32 |
 
-`belief_trace` 按正确 step 比例给分；`answer` 分只在完整 trace 正确且最终答案正确时发放。
+`belief_trace` 按正确 step 比例给分；`answer` 分只在所有status正确且最终答案正确时发放。
 
 ## 环境安装
 
