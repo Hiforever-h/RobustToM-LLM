@@ -10,6 +10,12 @@ RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)}"
 TRAIN_DIR="${TRAIN_DIR:-data/rft/accepted/${RUN_ID}}"
 CANDIDATES="${CANDIDATES:?Set CANDIDATES to an existing raw candidate JSONL}"
 MODEL="${MODEL:-Qwen/Qwen2.5-3B-Instruct}"
+COMPACT_PROMPT="${COMPACT_PROMPT:-0}"
+
+BUILD_DATASET_ARGS=()
+if [[ "${COMPACT_PROMPT}" == "1" ]]; then
+  BUILD_DATASET_ARGS+=(--compact-prompt)
+fi
 
 mkdir -p "${SCORING_DIR}/${RUN_ID}" "${TRAIN_DIR}"
 
@@ -28,7 +34,8 @@ python -m rft.build_dataset \
   --scored "${SCORING_DIR}/${RUN_ID}/scored.jsonl" \
   --output "${TRAIN_DIR}/train.jsonl" \
   --min-samples "${MIN_SAMPLES:-1000}" \
-  --max-samples "${MAX_SAMPLES:-3000}"
+  --max-samples "${MAX_SAMPLES:-3000}" \
+  "${BUILD_DATASET_ARGS[@]}"
 
 python -m rft.train \
   --model "${MODEL}" \

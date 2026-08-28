@@ -11,7 +11,11 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from rft.common import read_jsonl
-from rft.prompt import NATURAL_COT_PROMPT_VERSION
+from rft.prompt import (
+    COMPACT_NATURAL_COT_PROMPT_VERSION,
+    NATURAL_COT_PROMPT_VERSION,
+    compact_process_record,
+)
 from rft.reward import parse_prediction, score_process_output
 from scripts.reward import (
     ANSWER_RE,
@@ -24,7 +28,11 @@ from scripts.reward import (
 )
 
 NATURAL_PROMPT_VERSIONS = frozenset(
-    {"natural-cot-think-state-v1", NATURAL_COT_PROMPT_VERSION}
+    {
+        "natural-cot-think-state-v1",
+        NATURAL_COT_PROMPT_VERSION,
+        COMPACT_NATURAL_COT_PROMPT_VERSION,
+    }
 )
 
 
@@ -356,6 +364,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Call scripts/reward.py's external Judge before computing metrics",
     )
+    parser.add_argument(
+        "--compact-prompt",
+        action="store_true",
+        help=(
+            "Rebuild --data prompts with the compact protocol so optional Judge "
+            "scoring matches compact-prompt predictions"
+        ),
+    )
     parser.add_argument("--max-workers", type=int, default=8)
     parser.add_argument("--cache-dir", type=Path)
     parser.add_argument("--base-url", default="https://api.deepseek.com")
@@ -371,6 +387,10 @@ def main() -> None:
     args = parse_args()
     predictions = read_jsonl(args.predictions)
     data = read_jsonl(args.data) if args.data else None
+    if args.compact_prompt:
+        if data is None:
+            raise ValueError("--compact-prompt requires --data")
+        data = [compact_process_record(row) for row in data]
     if args.answer_only:
         if data is None:
             raise ValueError("--answer-only requires --data with answer fields")

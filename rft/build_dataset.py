@@ -9,7 +9,20 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
-from rft.common import canonical_json, pair_id, read_jsonl, sample_id, sha256_file, stable_hash, write_jsonl
+from rft.common import (
+    canonical_json,
+    pair_id,
+    read_jsonl,
+    sample_id,
+    sha256_file,
+    sha256_text,
+    stable_hash,
+    write_jsonl,
+)
+from rft.prompt import (
+    COMPACT_NATURAL_COT_PROMPT_VERSION,
+    build_compact_process_prompt,
+)
 from scripts.reward import normalize, score_rule_components
 
 
@@ -83,6 +96,7 @@ def build_dataset(
     require_complete_pairs: bool = False,
     max_candidates_per_prompt: int = 0,
     deduplicate_semantic: bool = False,
+    compact_prompt: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if min_samples < 0 or max_samples < 0 or min_samples > max_samples:
         raise ValueError("Require 0 <= min_samples <= max_samples")
@@ -143,6 +157,18 @@ def build_dataset(
     for row in final_rows:
         final_pair_sides[pair_id(row)].add(str(row.get("intervention_type")))
     final_complete_pair_count = sum(sides == {"observed", "hidden"} for sides in final_pair_sides.values())
+    source_prompt_versions = Counter(
+        str(row["process_prompt_version"])
+        for row in final_rows
+        if isinstance(row.get("process_prompt_version"), str)
+    )
+    output_prompt_version = (
+        COMPACT_NATURAL_COT_PROMPT_VERSION
+        if compact_prompt
+        else next(iter(source_prompt_versions), None)
+        if len(source_prompt_versions) <= 1
+        else None
+    )
     manifest = {
         "accepted_candidate_count": len(accepted),
         "selected_candidate_count": len(selected_rows),
@@ -152,6 +178,9 @@ def build_dataset(
         "require_complete_pairs": require_complete_pairs,
         "max_candidates_per_prompt": max_candidates_per_prompt,
         "deduplicate_semantic": deduplicate_semantic,
+        "compact_prompt": compact_prompt,
+        "process_prompt_version": output_prompt_version,
+        "source_process_prompt_version_counts": dict(source_prompt_versions),
         "duplicate_candidate_count": duplicate_candidates,
         "final_sample_count": len(final_rows),
         "min_samples": min_samples,
@@ -166,11 +195,23 @@ def build_dataset(
 
     output_rows = []
     for row in final_rows:
+        source_process_prompt = row["process_prompt"]
+        process_prompt = (
+            build_compact_process_prompt(row)
+            if compact_prompt
+            else source_process_prompt
+        )
         output_rows.append(
             {
                 "global_sample_id": row["global_sample_id"],
                 "global_pair_id": row["global_pair_id"],
-                "process_prompt": row["process_prompt"],
+                "process_prompt": process_prompt,
+                "process_prompt_version": (
+                    COMPACT_NATURAL_COT_PROMPT_VERSION
+                    if compact_prompt
+                    else row.get("process_prompt_version")
+                ),
+                "source_process_prompt_sha256": sha256_text(source_process_prompt),
                 "accepted_response": row["raw_response"],
                 "process_target": row["process_target"],
                 "process_reward": row["score"]["reward"],
@@ -213,6 +254,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Collapse equivalent normalized Think/State/Answer responses before selection",
     )
+    parser.add_argument(
+        "--compact-prompt",
+        action="store_true",
+        help=(
+            "Replace the sampled v2 actor prompt with judge_prompt plus concise "
+            "Think/State/Answer format instructions in the SFT dataset"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -226,6 +275,7 @@ def main() -> None:
         args.require_complete_pairs,
         args.max_candidates_per_prompt,
         args.deduplicate_semantic,
+        args.compact_prompt,
     )
     write_jsonl(args.output, rows)
     manifest["scored_sha256"] = sha256_file(args.scored)

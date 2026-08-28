@@ -9,7 +9,16 @@ from pathlib import Path
 from typing import Any
 
 from rft.common import prompt_from_record, read_jsonl, sha256_text, write_jsonl
-from rft.prompt import format_chat_prompt
+from rft.prompt import compact_process_record, format_chat_prompt
+
+
+def prepare_generation_rows(
+    rows: list[dict[str, Any]], compact_prompt: bool = False
+) -> list[dict[str, Any]]:
+    """Prepare model inputs without mutating the source dataset records."""
+    if not compact_prompt:
+        return rows
+    return [compact_process_record(row) for row in rows]
 
 
 def generate_vllm(
@@ -122,12 +131,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.45)
     parser.add_argument("--backend", choices=("vllm", "transformers"), default="vllm")
+    parser.add_argument(
+        "--compact-prompt",
+        action="store_true",
+        help=(
+            "Generate from judge_prompt plus the same concise Think/State/Answer "
+            "instructions used by build_dataset --compact-prompt"
+        ),
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    rows = read_jsonl(args.data)
+    rows = prepare_generation_rows(read_jsonl(args.data), args.compact_prompt)
     if args.backend == "vllm":
         predictions = generate_vllm(rows, args.model, args.revision, args.max_new_tokens, args.seed, args.gpu_memory_utilization)
     else:

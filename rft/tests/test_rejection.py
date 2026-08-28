@@ -1,7 +1,10 @@
 import unittest
 
 from rft.build_dataset import build_dataset
-from rft.prompt import NATURAL_COT_PROMPT_VERSION
+from rft.prompt import (
+    COMPACT_NATURAL_COT_PROMPT_VERSION,
+    NATURAL_COT_PROMPT_VERSION,
+)
 from rft.score_candidates import score_candidates
 from scripts.reward import NaturalCoTReward
 
@@ -199,6 +202,37 @@ class RejectionTest(unittest.TestCase):
         self.assertFalse(stricter[0]["accepted"])
         self.assertEqual(
             stricter[0]["acceptance_reason"], "reward_below_threshold"
+        )
+
+    def test_compact_dataset_replaces_scaffold_but_keeps_sampled_response(self):
+        record = self.record("observed", "linen chest")
+        record["process_prompt"] = (
+            "Story and question.\n\nReasoning rules:\nold detailed rules\n\n"
+            "Required output format:\nThink 1:\n<reasoning>\nState: <location>"
+        )
+        candidate = {
+            **record,
+            "candidate_id": "compact-candidate",
+            "raw_response": response("linen chest"),
+            "generation_reached_eos": True,
+        }
+        scored, _ = score_candidates([candidate])
+        output, manifest = build_dataset(
+            scored, min_samples=1, compact_prompt=True
+        )
+        self.assertEqual(output[0]["accepted_response"], candidate["raw_response"])
+        self.assertTrue(output[0]["process_prompt"].startswith("Story and question."))
+        self.assertNotIn("Reasoning rules:", output[0]["process_prompt"])
+        self.assertNotIn("Required output format:", output[0]["process_prompt"])
+        self.assertNotIn("<", output[0]["process_prompt"])
+        self.assertEqual(
+            output[0]["process_prompt_version"],
+            COMPACT_NATURAL_COT_PROMPT_VERSION,
+        )
+        self.assertTrue(manifest["compact_prompt"])
+        self.assertEqual(
+            manifest["process_prompt_version"],
+            COMPACT_NATURAL_COT_PROMPT_VERSION,
         )
 
 

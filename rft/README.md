@@ -153,7 +153,8 @@ python -m rft.build_dataset \
   --output "data/rft/accepted/${RUN_ID}/train.jsonl" \
   --min-samples 0 \
   --max-samples 3000 \
-  --seed 2026
+  --seed 2026 \
+  --compact-prompt
 ```
 
 The scored JSONL keeps the binary score, deterministic rule details, acceptance
@@ -162,6 +163,17 @@ the default mode.
 The dataset builder consumes the resulting `accepted` flag; it does not apply a
 second score policy. It trains only on accepted sampled responses and never
 falls back to a gold response.
+
+With `--compact-prompt`, the builder reconstructs each training prompt from
+`judge_prompt` and appends only a concise output contract: produce exactly the
+number of `Think` blocks implied by the question's ToM order, one `State:` per
+block, and one final `Answer:`. The prompt defines N as the number of nested
+belief levels and requires the model to infer N from the question; it never
+injects `question_order` or `process_target.tom_order`. It does not retain the
+v2 reasoning-rules section, empty output scaffold, angle-bracket placeholders,
+or any gold state. The accepted sampled response is unchanged. Output rows are marked
+`natural-cot-think-state-v3-compact` and retain the source prompt hash for
+auditability. Omitting the flag preserves the sampled v2 actor prompt.
 
 By default, every accepted trajectory is eligible and incomplete
 observed/hidden pair coverage is allowed. Optional controls are:
@@ -218,8 +230,12 @@ python -m rft.generate \
   --data data/rft/derived_v3_fewshot/dev.jsonl \
   --model "runs/rft_train/${RUN_ID}/final" \
   --output "runs/rft_eval/${RUN_ID}/dev_predictions.jsonl" \
-  --max-new-tokens 384
+  --max-new-tokens 384 \
+  --compact-prompt
 ```
+
+Use `--compact-prompt` at generation time when the training dataset was built
+with it, so SFT and inference see the same prompt contract.
 
 Deterministic evaluation makes no Judge call and reports structure, reasoning
 presence, per-step/all-state accuracy, answer accuracy, pair and shortcut
@@ -231,7 +247,8 @@ answer response has a rule-only score of 0.52.
 python -m rft.evaluate \
   --predictions "runs/rft_eval/${RUN_ID}/dev_predictions.jsonl" \
   --data data/rft/derived_v3_fewshot/dev.jsonl \
-  --output "runs/rft_eval/${RUN_ID}/dev_rule_metrics.json"
+  --output "runs/rft_eval/${RUN_ID}/dev_rule_metrics.json" \
+  --compact-prompt
 ```
 
 Add `--judge` for the true combined reward and full-reward rate:
@@ -241,6 +258,7 @@ python -m rft.evaluate \
   --predictions "runs/rft_eval/${RUN_ID}/dev_predictions.jsonl" \
   --data data/rft/derived_v3_fewshot/dev.jsonl \
   --output "runs/rft_eval/${RUN_ID}/dev_judged_metrics.json" \
+  --compact-prompt \
   --judge \
   --cache-dir "runs/rft_eval/${RUN_ID}/judge_cache" \
   --max-workers 8
@@ -260,5 +278,10 @@ Judge, resample, or fabricate completions.
 ```bash
 CANDIDATES=/path/to/candidates.jsonl \
 RUN_ID=20260826-natural-rft \
+COMPACT_PROMPT=1 \
 bash rft/run_rft.sh
 ```
+
+`COMPACT_PROMPT=1` passes `--compact-prompt` to the dataset builder. It changes
+only the SFT conditioning prompts; scoring still validates candidates against
+the exact v2 prompts used during sampling.
