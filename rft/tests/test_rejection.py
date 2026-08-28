@@ -1,6 +1,7 @@
 import unittest
 
 from rft.build_dataset import build_dataset
+from rft.prompt import NATURAL_COT_PROMPT_VERSION
 from rft.score_candidates import score_candidates
 from scripts.reward import NaturalCoTReward
 
@@ -53,7 +54,7 @@ class RejectionTest(unittest.TestCase):
             "global_pair_id": pair,
             "process_prompt": "Natural actor prompt.",
             "judge_prompt": "Story and question.",
-            "process_prompt_version": "natural-cot-think-state-v1",
+            "process_prompt_version": NATURAL_COT_PROMPT_VERSION,
             "process_target": make_target(answer),
             "source_dataset": "symbolic-tom-v3",
             "question_order": 1,

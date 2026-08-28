@@ -97,11 +97,13 @@ bash grpo/run_grpo_natural.sh build
 该命令会：
 
 1. 从 `RAW_DATA_DIR` 读取 v3 train/val/test JSONL；
-2. 删除旧 `process_response`、JSON schema、few-shot、事件编号和 prompt 中的实际换行；
-3. 生成 natural-CoT source JSONL 到 `NATURAL_SOURCE_DIR`；
-4. 生成 verl parquet 到 `GRPO_DATA_DIR`；
-5. 在 parquet 中显式保存 `judge_prompt` 和隐藏的结构化 process target；
-6. 使用 `RFT_MODEL_PATH` 的 tokenizer 审计 prompt 长度。
+2. 删除旧 `process_response`、JSON schema、few-shot 和事件编号；
+3. 为每个样本生成 `natural-cot-think-state-v2-exact-order` 多行 actor prompt，
+   明确 ToM 阶数、人物层级和恰好 N 个空 `Think/State` 模板；
+4. 生成 natural-CoT source JSONL 到 `NATURAL_SOURCE_DIR`；
+5. 生成 verl parquet 到 `GRPO_DATA_DIR`；
+6. 在 parquet 中显式保存 `judge_prompt` 和隐藏的结构化 process target；
+7. 使用 `RFT_MODEL_PATH` 的 tokenizer 审计 prompt 长度。
 
 仓库当前已包含一份构建结果：
 

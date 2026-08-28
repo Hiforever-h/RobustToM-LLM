@@ -15,9 +15,10 @@ from pathlib import Path
 from typing import Any
 
 from rft.common import pair_id, read_jsonl, sha256_file, write_jsonl
+from rft.prompt import NATURAL_COT_PROMPT_VERSION
 from scripts.reward import normalize, score_rule_components
 
-PROMPT_VERSION = "natural-cot-think-state-v1"
+PROMPT_VERSION = NATURAL_COT_PROMPT_VERSION
 SOURCE_TO_RFT_SPLIT = {"train": "train", "val": "dev", "test": "test"}
 
 

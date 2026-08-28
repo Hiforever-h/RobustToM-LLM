@@ -1,6 +1,7 @@
 import json
 import re
 import unittest
+from copy import deepcopy
 from pathlib import Path
 
 from grpo.build_natural_dataset import (
@@ -9,6 +10,7 @@ from grpo.build_natural_dataset import (
 )
 from grpo.prompt import build_natural_cot_prompt, build_natural_problem_prompt
 from rft.common import read_jsonl
+from rft.prompt import NATURAL_COT_PROMPT_VERSION
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -26,30 +28,63 @@ class FakeTokenizer:
 class NaturalCoTDatasetTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.raw = read_jsonl(
+        rows = read_jsonl(
             ROOT / "data/counterfactual_process_reward_v3/train.jsonl"
-        )[0]
+        )
+        cls.raw = rows[0]
+        cls.raw_by_order = {
+            order: next(row for row in rows if row["question_order"] == order)
+            for order in (1, 2, 3)
+        }
 
-    def test_prompt_removes_json_few_shots_event_numbers_and_newlines(self):
+    def test_prompt_uses_dynamic_exact_order_template(self):
         actor_prompt = build_natural_cot_prompt(self.raw)
         judge_prompt = build_natural_problem_prompt(self.raw)
-        self.assertNotIn("\n", actor_prompt)
+        self.assertIn("\n", actor_prompt)
         self.assertNotIn("\n", judge_prompt)
         self.assertNotIn("belief_trace", actor_prompt)
         self.assertNotIn("Schema:", actor_prompt)
         self.assertNotIn("Demonstration", actor_prompt)
+        self.assertNotIn("Example response format", actor_prompt)
+        self.assertNotIn("Sophia", actor_prompt)
         self.assertNotRegex(actor_prompt, re.compile(r"Story:\s*\d+\s"))
-        self.assertIn("Think N:", actor_prompt)
+        order = self.raw["process_target"]["tom_order"]
+        self.assertIn(f"Output exactly {order} Think/State blocks", actor_prompt)
+        self.assertIn(f"Answer must repeat the State from Think {order}", actor_prompt)
         self.assertIn("State: <location>", actor_prompt)
-        self.assertIn("Answer: <location>", actor_prompt)
-        self.assertNotIn("Think N:", judge_prompt)
+        self.assertNotIn("Reasoning rules:", judge_prompt)
+
+    def test_prompt_maps_every_order_from_inner_to_outer(self):
+        for order, source in self.raw_by_order.items():
+            with self.subTest(order=order):
+                prompt = build_natural_cot_prompt(source)
+                chain = source["process_target"]["belief_chain"]
+                self.assertIn(" -> ".join(chain), prompt)
+                self.assertIn(f"Output exactly {order} Think/State", prompt)
+                for index in range(1, order + 1):
+                    self.assertEqual(prompt.count(f"Think {index}:"), 1)
+                self.assertNotIn(f"Think {order + 1}:", prompt)
+                self.assertIn(
+                    f"Answer: <same location as State from Think {order}>", prompt
+                )
+
+    def test_prompt_does_not_use_gold_locations(self):
+        source = deepcopy(self.raw)
+        sentinel = "secret_gold_location_never_in_problem"
+        source["answer"] = sentinel
+        source["process_target"]["answer"] = sentinel
+        for step in source["process_target"]["belief_trace"]:
+            step["location"] = sentinel
+        self.assertNotIn(sentinel, build_natural_cot_prompt(source))
 
     def test_natural_source_deletes_legacy_response_and_prompt(self):
         row = build_natural_source_row(self.raw)
         self.assertNotIn("process_response", row)
         self.assertNotIn("prompt", row)
-        self.assertEqual(row["process_prompt_version"], "natural-cot-think-state-v1")
+        self.assertEqual(row["process_prompt_version"], NATURAL_COT_PROMPT_VERSION)
         self.assertNotIn("\n", row["story"])
+        self.assertIn("\n", row["process_prompt"])
+        self.assertNotIn("\n", row["judge_prompt"])
         self.assertEqual(row["process_target"], self.raw["process_target"])
 
     def test_parquet_row_preserves_explicit_judge_prompt_and_target(self):
@@ -70,12 +105,30 @@ class NaturalCoTDatasetTest(unittest.TestCase):
         data_dir = ROOT / "data/counterfactual_process_reward_v4_natural"
         manifest = json.loads((data_dir / "manifest.json").read_text(encoding="utf-8"))
         self.assertFalse(manifest["contains_process_response"])
+        self.assertEqual(manifest["prompt_version"], NATURAL_COT_PROMPT_VERSION)
+        self.assertTrue(manifest["multiline_actor_prompts"])
+        self.assertTrue(manifest["single_line_judge_prompts"])
         self.assertEqual(manifest["splits"]["train"]["count"], 3200)
         for split, expected_count in (("train", 3200), ("val", 400), ("test", 600)):
             rows = read_jsonl(data_dir / f"{split}.jsonl")
             self.assertEqual(len(rows), expected_count)
             self.assertTrue(all("process_response" not in row for row in rows))
-            self.assertTrue(all("\n" not in row["process_prompt"] for row in rows))
+            self.assertTrue(all("\n" in row["process_prompt"] for row in rows))
+            self.assertTrue(all("\n" not in row["judge_prompt"] for row in rows))
+            self.assertTrue(
+                all(
+                    row["process_prompt_version"] == NATURAL_COT_PROMPT_VERSION
+                    for row in rows
+                )
+            )
+            for row in rows:
+                prompt = row["process_prompt"]
+                order = row["process_target"]["tom_order"]
+                self.assertEqual(prompt, build_natural_cot_prompt(row))
+                self.assertNotIn("Example response format", prompt)
+                for index in range(1, order + 1):
+                    self.assertEqual(prompt.count(f"Think {index}:"), 1)
+                self.assertNotIn(f"Think {order + 1}:", prompt)
 
 
 if __name__ == "__main__":

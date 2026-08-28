@@ -2,6 +2,7 @@ import json
 import unittest
 
 from rft.evaluate import evaluate_answer_predictions, evaluate_predictions
+from rft.prompt import NATURAL_COT_PROMPT_VERSION
 
 
 class EvaluateTest(unittest.TestCase):
@@ -167,7 +168,7 @@ class EvaluateTest(unittest.TestCase):
             {
                 "global_sample_id": "natural-1",
                 "global_pair_id": "natural-pair-1",
-                "process_prompt_version": "natural-cot-think-state-v1",
+                "process_prompt_version": NATURAL_COT_PROMPT_VERSION,
                 "process_target": target,
                 "response": (
                     "Think 1:\nAlice observed the move.\n"

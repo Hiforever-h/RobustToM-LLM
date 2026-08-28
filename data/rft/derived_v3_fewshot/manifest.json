@@ -1,7 +1,7 @@
 {
   "name": "RobustToM natural-CoT v4 RFT split",
   "source_dataset_dir": "data/counterfactual_process_reward_v4_natural",
-  "prompt_version": "natural-cot-think-state-v1",
+  "prompt_version": "natural-cot-think-state-v2-exact-order",
   "contains_process_response": false,
   "split_mapping": {
     "train": "train",
@@ -11,15 +11,15 @@
   "input_files": {
     "train": {
       "path": "data/counterfactual_process_reward_v4_natural/train.jsonl",
-      "sha256": "d4bf6247a202d949580034c9ba2e46f133514a96b7b392761d39ed6b05eb6fe6"
+      "sha256": "86ae607355fb8e565cf870b732c742a7c7df86c2c26e77d7e89340fe4d20ca57"
     },
     "val": {
       "path": "data/counterfactual_process_reward_v4_natural/val.jsonl",
-      "sha256": "f0da8cf55ae1c7c3148798e95977c5dbf4a67e4f14a82ee607c8e75139d1edf7"
+      "sha256": "f743eee07b2b8373f2b74ad54b8d251502e55190dc10da8e00f4753ca0499039"
     },
     "test": {
       "path": "data/counterfactual_process_reward_v4_natural/test.jsonl",
-      "sha256": "22d95cf2886affa6b6413c341f81e56060e9fabaf1f85322aee72dff134745be"
+      "sha256": "47f3f4dad5df583e371668d72f7fa0ac4e4969b68950c6ab3a406c134824c393"
     }
   },
   "split_counts": {
@@ -46,9 +46,9 @@
     "hidden": 2100
   },
   "output_sha256": {
-    "train": "0bcd861cea03f91dec5bed220af96f37dcdf57d9d545e783489e90b0f9c031e6",
-    "dev": "e433d8fdc38c71f4a2f7ce47a852d640905e8e98c4243cad40cb5e43c014428d",
-    "test": "772fd6c13fa2ea2ac4eb45496574d07885f60cabdd3cd51f37d9c2d6419855f2"
+    "train": "9d03a87a02233f70782a5fe85d02e4bde4c8022a6dd67ccf3efaff171c4bb673",
+    "dev": "a3794744d5c5e3625b333525103db139d5f0e611f3ea55ca5325f0613aa724f5",
+    "test": "538337916e7e7e7979ab5811a423ec73722c3d6420d769a71eb44c33dfa9082a"
   },
   "process_target_version": "2.0"
 }

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Build the natural-CoT source JSONL and verl parquet dataset.
 
-The actor sees a one-line task plus the lightweight Think/State/Answer output
-protocol. The Judge receives ``judge_prompt`` as a separate parquet column.
+The actor sees a dynamic exact-order Think/State/Answer protocol. The Judge
+receives ``judge_prompt`` as a separate one-line parquet column.
 Neither artifact contains the legacy canonical ``process_response``.
 """
 
@@ -23,9 +23,10 @@ from grpo.prompt import (
     clean_numbered_story,
 )
 from rft.common import read_jsonl
+from rft.prompt import NATURAL_COT_PROMPT_VERSION
 
 DATA_SOURCE = "robust_tom_natural_cot_v4"
-PROMPT_VERSION = "natural-cot-think-state-v1"
+PROMPT_VERSION = NATURAL_COT_PROMPT_VERSION
 EXPECTED_SPLIT_COUNTS = {"train": 3200, "val": 400, "test": 600}
 
 
@@ -79,8 +80,10 @@ def build_natural_source_row(source: Mapping[str, Any]) -> dict[str, Any]:
         "prompt",
     ):
         row.pop(key, None)
-    if "\n" in row["story"] or "\n" in row["process_prompt"]:
-        raise AssertionError("Natural-CoT stories and prompts must be single-line")
+    if "\n" in row["story"] or "\n" in row["judge_prompt"]:
+        raise AssertionError("Natural-CoT stories and Judge prompts must be single-line")
+    if "\n" not in row["process_prompt"]:
+        raise AssertionError("Natural-CoT actor prompts must expose a multiline template")
     return row
 
 
@@ -119,7 +122,8 @@ def prepare_source_dataset(input_dir: Path, output_dir: Path) -> dict[str, Any]:
         "prompt_version": PROMPT_VERSION,
         "contains_process_response": False,
         "event_numbers_removed": True,
-        "single_line_prompts": True,
+        "multiline_actor_prompts": True,
+        "single_line_judge_prompts": True,
         "splits": split_metrics,
     }
     manifest_path = output_dir / "manifest.json"
@@ -146,6 +150,11 @@ def build_parquet_row(
         raise ValueError("Natural source row is missing judge_prompt")
     if source.get("process_response") is not None:
         raise ValueError("Natural source rows must not contain process_response")
+    if source.get("process_prompt_version") != PROMPT_VERSION:
+        raise ValueError(
+            "Natural source row has an unexpected process_prompt_version: "
+            f"{source.get('process_prompt_version')!r}"
+        )
 
     prompt_length = len(chat_prompt_token_ids(tokenizer, actor_prompt))
     if prompt_length > max_prompt_length:

@@ -10,6 +10,12 @@ replaces the actor `process_prompt` with the `Think N / State / Answer` prompt,
 adds `judge_prompt`, and removes the canonical `process_response`, legacy
 `prompt`, and old token-count fields.
 
+The actor prompt version is `natural-cot-think-state-v2-exact-order`. Each row
+states its exact ToM order and belief-chain mapping, renders exactly that many
+empty `Think/State` blocks, and tells the model to stop after `Answer`. The old
+fixed three-step format example has been removed; no gold State or Answer is
+inserted into the actor instructions.
+
 Split mapping is `train -> train`, `val -> dev`, and `test -> test`; there is no
 resampling. The `split` field of the 400 validation rows is changed to `dev`,
 while `source_split` remains `val` for provenance.

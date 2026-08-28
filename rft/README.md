@@ -36,6 +36,12 @@ State: <location>
 Answer: <final outermost location>
 ```
 
+The current actor prompt version is
+`natural-cot-think-state-v2-exact-order`. For every row it states the exact
+ToM order, renders the outermost-to-innermost belief chain, maps each `Think N`
+to its belief level, and includes exactly that many empty output blocks. It has
+no fixed three-step demonstration and does not expose any gold location.
+
 There must be exactly one numbered block per gold trace step, in order, one
 `State:` per block, one final `Answer:`, no duplicate/extra steps, and no text
 outside the blocks. Markers must begin on a new line.
@@ -89,14 +95,38 @@ The command verifies natural prompt/version fields, absence of
 `process_response`, target/answer agreement, complete observed/hidden pairs,
 and split isolation. It maps source `val` to RFT `dev` without resampling.
 
-## Sample candidates
+## Build the balanced pilot split
+
+The checked-in pilot contains 50 complete observed/hidden pairs for each of
+orders 1, 2, and 3: 300 prompts total. With 16 samples per prompt it produces
+4,800 candidates.
 
 ```bash
-RUN_ID=20260826-qwen25-3b-natural-k16
+python -m scripts.sample_rft_pilot \
+  --input data/rft/derived_v3_fewshot/train.jsonl \
+  --output data/rft/pilot_v2/train.jsonl \
+  --pairs-per-order 50 \
+  --orders 1 2 3 \
+  --seed 2026 \
+  --num-samples-per-prompt 16
+```
+
+Selection ranks complete pairs with a stable hash, so it is independent of
+input row order and reproducible from the source hash recorded in the pilot
+manifest.
+
+## Sample candidates
+
+Candidates are bound to the exact actor prompt hash. Runs sampled with the old
+v1 fixed three-step example, including the `20260826-qwen25-3b-natural-k16`
+run, must not be rescored against this v2 data; sample a new run instead.
+
+```bash
+RUN_ID=20260828-qwen25-3b-natural-v2-k16
 MODEL=Qwen/Qwen2.5-3B-Instruct
 
 CUDA_VISIBLE_DEVICES=0 python -m rft.sample \
-  --data data/rft/derived_v3_fewshot/train.jsonl \
+  --data data/rft/pilot_v2/train.jsonl \
   --model "${MODEL}" \
   --output "runs/rft_sampling/${RUN_ID}/candidates.jsonl" \
   --num-samples 16 \
@@ -223,8 +253,9 @@ usable.
 
 ## One-command continuation from existing candidates
 
-`run_rft.sh` starts from an existing candidate file, scores with the Judge,
-builds accepted data, and trains. It does not resample or fabricate completions.
+`run_rft.sh` starts from an existing candidate file, applies the default local
+State+Answer scoring, builds accepted data, and trains. It does not call the
+Judge, resample, or fabricate completions.
 
 ```bash
 CANDIDATES=/path/to/candidates.jsonl \

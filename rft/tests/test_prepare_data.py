@@ -4,6 +4,7 @@ from pathlib import Path
 
 from rft.common import write_jsonl
 from rft.prepare_data import derive_split
+from rft.prompt import NATURAL_COT_PROMPT_VERSION
 
 
 class PrepareDataTest(unittest.TestCase):
@@ -40,7 +41,7 @@ class PrepareDataTest(unittest.TestCase):
                     "answer": answer,
                     "process_prompt": "Think/State/Answer actor prompt",
                     "judge_prompt": "Story and question only",
-                    "process_prompt_version": "natural-cot-think-state-v1",
+                    "process_prompt_version": NATURAL_COT_PROMPT_VERSION,
                 }
             )
         return rows

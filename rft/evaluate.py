@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from rft.common import read_jsonl
+from rft.prompt import NATURAL_COT_PROMPT_VERSION
 from rft.reward import parse_prediction, score_process_output
 from scripts.reward import (
     ANSWER_RE,
@@ -22,7 +23,9 @@ from scripts.reward import (
     score_rule_components,
 )
 
-NATURAL_PROMPT_VERSION = "natural-cot-think-state-v1"
+NATURAL_PROMPT_VERSIONS = frozenset(
+    {"natural-cot-think-state-v1", NATURAL_COT_PROMPT_VERSION}
+)
 
 
 def _percentile(values: list[int], percentile: float) -> float:
@@ -108,7 +111,7 @@ def evaluate_answer_predictions(
 
 
 def _is_natural_row(row: dict[str, Any], response: str) -> bool:
-    if row.get("process_prompt_version") == NATURAL_PROMPT_VERSION:
+    if row.get("process_prompt_version") in NATURAL_PROMPT_VERSIONS:
         return True
     return any(line.lower().startswith("think ") for line in response.splitlines())
 
