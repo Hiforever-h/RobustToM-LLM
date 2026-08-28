@@ -10,9 +10,9 @@
 
 1. **Counterfactual data**：基于 Hi-ToM 和 ExploreToM 风格构造
    `observed` / `hidden` 成对样本，尽量避免shortcut数据出现。
-2. **RFT**：对每个训练 prompt 采样 `K=16` 个候选，只保留严格 JSON、正常 EOS 且
-   process reward 为 `1.0` 的完整轨迹，进行 response-only fine-tuning。
-3. **GRPO**：从 RFT checkpoint 继续训练，每个 prompt 使用 16 个 rollout，按照结构化
+2. **RFT**：对每个训练 prompt 采样 `K=16` 个候选，只保留stasus全部正确、正常 EOS 且
+   answer正确的完整轨迹，进行 response-only fine-tuning。
+3. **GRPO**：从 RFT checkpoint 继续训练，每个 prompt 使用 16 个 rollout，按照
    process reward 优化完整 belief trace 和最终答案。
 
 模型输出格式如下：
