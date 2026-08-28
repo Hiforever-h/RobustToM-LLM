@@ -4,8 +4,9 @@ from rft.build_dataset import build_dataset
 from rft.prompt import (
     COMPACT_NATURAL_COT_PROMPT_VERSION,
     NATURAL_COT_PROMPT_VERSION,
+    compact_process_record,
 )
-from rft.score_candidates import score_candidates
+from rft.score_candidates import prepare_scoring_source_rows, score_candidates
 from scripts.reward import NaturalCoTReward
 
 
@@ -234,6 +235,50 @@ class RejectionTest(unittest.TestCase):
             manifest["process_prompt_version"],
             COMPACT_NATURAL_COT_PROMPT_VERSION,
         )
+
+    def test_compact_sampling_source_can_be_scored_against_compact_data(self):
+        source = self.record("observed", "linen chest")
+        compact_candidate = {
+            **compact_process_record(source),
+            "candidate_id": "compact-sampled-candidate",
+            "raw_response": response("linen chest"),
+            "generation_reached_eos": True,
+        }
+        compact_source = prepare_scoring_source_rows([source], compact_prompt=True)
+        scored, _ = score_candidates([compact_candidate], compact_source)
+        self.assertTrue(scored[0]["accepted"])
+        self.assertEqual(
+            scored[0]["process_prompt_version"],
+            COMPACT_NATURAL_COT_PROMPT_VERSION,
+        )
+
+    def test_manifest_reports_group_variance_and_think_step_counts(self):
+        record = self.record("observed", "linen chest")
+        candidates = [
+            {
+                **record,
+                "candidate_id": "correct",
+                "raw_response": response("linen chest"),
+                "generation_reached_eos": True,
+            },
+            {
+                **record,
+                "candidate_id": "incorrect",
+                "raw_response": response("archive drawer"),
+                "generation_reached_eos": True,
+            },
+        ]
+        _, manifest = score_candidates(candidates)
+        group = manifest["group_reward_diagnostics"]
+        self.assertEqual(group["group_count"], 1)
+        self.assertEqual(group["group_size_counts"], {"2": 1})
+        self.assertEqual(group["group_reward_std_mean"], 0.5)
+        self.assertEqual(group["zero_variance_group_rate"], 0.0)
+        self.assertEqual(group["all_zero_reward_group_rate"], 0.0)
+        think = manifest["think_step_diagnostics"]["1"]
+        self.assertEqual(think["actual_step_count_distribution"], {"1": 2})
+        self.assertEqual(think["exact_step_count_rate"], 1.0)
+        self.assertEqual(think["exact_numbered_sequence_rate"], 1.0)
 
 
 if __name__ == "__main__":

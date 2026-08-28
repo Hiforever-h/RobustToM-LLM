@@ -1,0 +1,18 @@
+{
+  "input": "data/rft/derived_v3_fewshot/dev.jsonl",
+  "input_sha256": "a3794744d5c5e3625b333525103db139d5f0e611f3ea55ca5325f0613aa724f5",
+  "output": "data/rft/derived_v3_fewshot_compact/dev.jsonl",
+  "output_sha256": "eed1b2cf3128e973a14da47692b98a621eb2d26d2dd5582dafbc9e485e6d324f",
+  "row_count": 400,
+  "process_prompt_version": "natural-cot-think-state-v3-compact",
+  "split_counts": {
+    "dev": 400
+  },
+  "order_counts": {
+    "3": 100,
+    "2": 200,
+    "1": 100
+  },
+  "contains_process_response": false,
+  "numeric_order_injected_into_format_instruction": false
+}

@@ -5,11 +5,31 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from rft.common import prompt_from_record, read_jsonl, sha256_file, sha256_text, write_jsonl
-from rft.prompt import format_chat_prompt
+from rft.common import (
+    prompt_from_record,
+    read_jsonl,
+    sha256_file,
+    sha256_text,
+    write_jsonl,
+)
+from rft.prompt import (
+    COMPACT_NATURAL_COT_PROMPT_VERSION,
+    compact_process_record,
+    format_chat_prompt,
+)
+
+
+def prepare_sampling_rows(
+    rows: list[dict[str, Any]], compact_prompt: bool = False
+) -> list[dict[str, Any]]:
+    """Prepare sampling inputs without mutating source dataset records."""
+    if not compact_prompt:
+        return rows
+    return [compact_process_record(row) for row in rows]
 
 
 def sample_with_vllm(
@@ -85,6 +105,8 @@ def sample_with_vllm(
                         "top_p": top_p,
                         "max_new_tokens": max_new_tokens,
                         "tensor_parallel_size": tensor_parallel_size,
+                        "compact_prompt": row.get("process_prompt_version")
+                        == COMPACT_NATURAL_COT_PROMPT_VERSION,
                     },
                     "source_dataset": row.get("source_dataset"),
                     "question_order": row.get("question_order"),
@@ -111,12 +133,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--tensor-parallel-size", type=int, default=1)
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.85)
+    parser.add_argument(
+        "--compact-prompt",
+        action="store_true",
+        help=(
+            "Sample from judge_prompt plus the compact Think/State/Answer "
+            "contract, without revealing the numeric ToM order"
+        ),
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    rows = read_jsonl(args.data)
+    rows = prepare_sampling_rows(read_jsonl(args.data), args.compact_prompt)
     candidates = sample_with_vllm(
         rows,
         model=args.model,
@@ -142,6 +172,10 @@ def main() -> None:
         "top_p": args.top_p,
         "max_new_tokens": args.max_new_tokens,
         "seed": args.seed,
+        "compact_prompt": args.compact_prompt,
+        "process_prompt_version_counts": dict(
+            Counter(str(row.get("process_prompt_version")) for row in rows)
+        ),
         "output_sha256": sha256_file(args.output),
     }
     args.output.with_name("candidate_manifest.json").write_text(

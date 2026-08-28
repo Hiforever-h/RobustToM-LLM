@@ -140,6 +140,51 @@ CUDA_VISIBLE_DEVICES=0 python -m rft.sample \
 The sampler applies the tokenizer's chat template once and records the raw
 response, response token IDs, EOS status, prompt hashes, and generation config.
 
+### Compact-prompt rollout audit
+
+To test whether an RFT checkpoint can infer the number of Think blocks without
+being told the numeric ToM order, add `--compact-prompt`:
+
+```bash
+python -m rft.sample \
+  --data data/rft/derived_v3_fewshot/dev.jsonl \
+  --model /path/to/rft/final \
+  --output runs/rft_sampling/compact-dev/candidates.jsonl \
+  --num-samples 16 \
+  --temperature 1.0 \
+  --top-p 1.0 \
+  --max-new-tokens 384 \
+  --seed 2026 \
+  --compact-prompt
+```
+
+The repository also provides the same 400-row dev split with compact prompts
+materialized in `data/rft/derived_v3_fewshot_compact/dev.jsonl`. It can be
+reproduced with:
+
+```bash
+python -m scripts.build_compact_rft_data \
+  --input data/rft/derived_v3_fewshot/dev.jsonl \
+  --output data/rft/derived_v3_fewshot_compact/dev.jsonl
+```
+
+Score dynamically compacted candidates against the original dev source with
+the matching flag:
+
+```bash
+python -m rft.score_candidates \
+  --candidates runs/rft_sampling/compact-dev/candidates.jsonl \
+  --data data/rft/derived_v3_fewshot/dev.jsonl \
+  --output runs/rft_sampling/compact-dev/scored.jsonl \
+  --compact-prompt
+```
+
+Add `--use-judge` to measure continuous Judge reward variance. The generated
+`acceptance_metrics.json` reports `group_reward_diagnostics`, including mean
+within-group reward standard deviation and zero-variance/all-zero group rates,
+plus `think_step_diagnostics` with the generated step-count distribution and
+exact step-count/numbering/structure rates for each expected ToM order.
+
 ## Score and build the accepted dataset
 
 ```bash

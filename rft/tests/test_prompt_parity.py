@@ -6,6 +6,8 @@ from rft.prompt import (
     build_compact_process_prompt,
     format_chat_prompt,
 )
+from rft.sample import prepare_sampling_rows
+from scripts.build_compact_rft_data import build_compact_data
 
 
 class FakeTokenizer:
@@ -62,6 +64,11 @@ class PromptParityTest(unittest.TestCase):
             prepared[0]["process_prompt_version"],
             COMPACT_NATURAL_COT_PROMPT_VERSION,
         )
+
+        sampled = prepare_sampling_rows([original], compact_prompt=True)
+        fixed_data = build_compact_data([original])
+        self.assertEqual(sampled, prepared)
+        self.assertEqual(fixed_data, prepared)
 
     def test_compact_prompt_does_not_require_or_reveal_target_order(self):
         compact = build_compact_process_prompt(

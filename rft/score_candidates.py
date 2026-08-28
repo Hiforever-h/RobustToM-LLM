@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from rft.common import canonical_json, read_jsonl, sha256_file, write_jsonl
+from rft.prompt import compact_process_record
 from scripts.reward import (
     DeepSeekJudge,
     JudgeConfig,
@@ -20,6 +21,105 @@ from scripts.reward import (
 
 DEFAULT_MIN_REWARD = 0.88
 DEFAULT_MIN_REASONING_SCORE = 0.5
+
+
+def prepare_scoring_source_rows(
+    rows: list[dict[str, Any]], compact_prompt: bool = False
+) -> list[dict[str, Any]]:
+    """Make source prompts match candidates sampled with compact prompting."""
+    if not compact_prompt:
+        return rows
+    return [compact_process_record(row) for row in rows]
+
+
+def _candidate_diagnostics(scored: list[dict[str, Any]]) -> dict[str, Any]:
+    reward_groups: defaultdict[str, list[float]] = defaultdict(list)
+    step_buckets: defaultdict[str, Counter[str]] = defaultdict(Counter)
+    for row in scored:
+        reward_groups[str(row["global_sample_id"])].append(
+            float(row["score"]["reward"])
+        )
+        parsed = row["rule_score"]["parsed"]
+        expected = int(parsed["expected_step_count"])
+        steps = parsed["steps"]
+        actual = len(steps)
+        indices = [int(step["index"]) for step in steps]
+        for bucket in ("overall", str(expected)):
+            counts = step_buckets[bucket]
+            counts["candidate_count"] += 1
+            counts[f"actual_steps={actual}"] += 1
+            counts["exact_step_count"] += int(actual == expected)
+            counts["exact_numbered_sequence"] += int(
+                indices == list(range(1, expected + 1))
+            )
+            counts["structure_valid"] += int(
+                bool(parsed["checks"]["structure_ok"])
+            )
+
+    group_stds: list[float] = []
+    all_zero_groups = 0
+    group_size_counts: Counter[str] = Counter()
+    for rewards in reward_groups.values():
+        group_size_counts[str(len(rewards))] += 1
+        mean = sum(rewards) / len(rewards)
+        group_stds.append(
+            (sum((reward - mean) ** 2 for reward in rewards) / len(rewards))
+            ** 0.5
+        )
+        all_zero_groups += int(all(abs(reward) <= 1e-12 for reward in rewards))
+
+    group_count = len(reward_groups)
+    group_diagnostics = {
+        "group_count": group_count,
+        "group_size_counts": dict(sorted(group_size_counts.items())),
+        "group_reward_std_mean": (
+            sum(group_stds) / len(group_stds) if group_stds else 0.0
+        ),
+        "zero_variance_group_count": sum(std <= 1e-12 for std in group_stds),
+        "zero_variance_group_rate": (
+            sum(std <= 1e-12 for std in group_stds) / group_count
+            if group_count
+            else 0.0
+        ),
+        "all_zero_reward_group_count": all_zero_groups,
+        "all_zero_reward_group_rate": (
+            all_zero_groups / group_count if group_count else 0.0
+        ),
+    }
+
+    think_diagnostics: dict[str, Any] = {}
+    for bucket, counts in sorted(step_buckets.items()):
+        candidate_count = counts["candidate_count"]
+        think_diagnostics[bucket] = {
+            "candidate_count": candidate_count,
+            "actual_step_count_distribution": {
+                key.removeprefix("actual_steps="): value
+                for key, value in sorted(counts.items())
+                if key.startswith("actual_steps=")
+            },
+            "exact_step_count": counts["exact_step_count"],
+            "exact_step_count_rate": (
+                counts["exact_step_count"] / candidate_count
+                if candidate_count
+                else 0.0
+            ),
+            "exact_numbered_sequence_count": counts["exact_numbered_sequence"],
+            "exact_numbered_sequence_rate": (
+                counts["exact_numbered_sequence"] / candidate_count
+                if candidate_count
+                else 0.0
+            ),
+            "structure_valid_count": counts["structure_valid"],
+            "structure_valid_rate": (
+                counts["structure_valid"] / candidate_count
+                if candidate_count
+                else 0.0
+            ),
+        }
+    return {
+        "group_reward_diagnostics": group_diagnostics,
+        "think_step_diagnostics": think_diagnostics,
+    }
 
 
 def _response(candidate: dict[str, Any]) -> str:
@@ -338,6 +438,7 @@ def score_candidates(
         },
         "source_candidate_sha256": None,
     }
+    manifest.update(_candidate_diagnostics(scored))
     return scored, manifest
 
 
@@ -369,6 +470,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=180.0)
     parser.add_argument("--retries", type=int, default=2)
     parser.add_argument("--thinking", choices=("enabled", "disabled"), default="disabled")
+    parser.add_argument(
+        "--compact-prompt",
+        action="store_true",
+        help=(
+            "Rebuild --data prompts with the compact protocol so they match "
+            "candidates produced by rft.sample --compact-prompt"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -388,14 +497,20 @@ def main() -> None:
             )
         )
         scorer = NaturalCoTReward(judge)
+    source_rows = read_jsonl(args.data) if args.data else None
+    if source_rows is not None:
+        source_rows = prepare_scoring_source_rows(
+            source_rows, args.compact_prompt
+        )
     rows, manifest = score_candidates(
         read_jsonl(args.candidates),
-        read_jsonl(args.data) if args.data else None,
+        source_rows,
         scorer=scorer,
         max_workers=args.max_workers,
         min_reward=args.min_reward,
         min_reasoning_score=args.min_reasoning_score,
     )
+    manifest["compact_prompt"] = args.compact_prompt
     manifest["source_candidate_sha256"] = sha256_file(args.candidates)
     if scorer is not None and hasattr(scorer.judge, "stats_snapshot"):
         manifest["judge_call_statistics"] = scorer.judge.stats_snapshot()
