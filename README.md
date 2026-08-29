@@ -1,264 +1,330 @@
-# RobustToM-RL
+# RobustToM-LLM
 
-面向高阶 Theory of Mind（ToM）的反事实数据构造、结构化过程监督与 GRPO 训练项目。
-本项目以 `Qwen2.5-3B-Instruct` 为基础模型，通过 RFT 和 GRPO 学习显式的嵌套信念链，
-并使用反事实观测干预降低 last-mention、world-state 等 shortcut。
+RobustToM-LLM是一个面向高阶Theory of Mind（ToM）推理的训练项目。项目以`Qwen2.5-3B-Instruct`为基础模型，通过反事实数据、Rejection Sampling Fine-Tuning（RFT）和Group Relative Policy Optimization（GRPO），训练模型显式追踪多层嵌套信念，
+并降低对world state、last mention等shortcut的依赖。
 
-## 方法概览
+当前主链路采用自然语言CoT输出，不再要求模型生成JSON。模型需要从问题本身判断ToM阶数`N`，输出恰好`N`个`Think/State`推理块，并让最终`Answer`重复最后一个`State`：
 
-训练流程分为三个阶段：
-
-1. **Counterfactual data**：基于 Hi-ToM 和 ExploreToM 风格构造
-   `observed` / `hidden` 成对样本，尽量避免shortcut数据出现。
-2. **RFT**：对每个训练 prompt 采样 `K=16` 个候选，只保留stasus全部正确、正常 EOS 且
-   answer正确的完整轨迹，进行 response-only fine-tuning。
-3. **GRPO**：从 RFT checkpoint 继续训练，每个 prompt 使用 16 个 rollout，按照
-   process reward 优化完整 belief trace 和最终答案。
-
-模型输出格式如下：
-
-```
+```text
 Think 1:
-Henry privately saw the flashlight move to blue_canvas_bag, so he believes it is there.
+Henry privately observed that the flashlight moved to the blue_canvas_bag.
 State: blue_canvas_bag
 Think 2:
-Thomas saw Henry observe the move to ceramic_jar, but did not see Henry's later private feed.
-Therefore Thomas believes Henry thinks it is in ceramic_jar.
+Thomas did not observe Henry's private update, so Thomas still believes that
+Henry thinks the flashlight is in the ceramic_jar.
 State: ceramic_jar
-Think 3:
-...
-State: brass_locker
-Answer: brass_locker
+Answer: ceramic_jar
 ```
 
-## 数据
+compact prompt只解释`N`的含义和输出协议，不向模型提供数字阶数、gold state、belief chain或空白答案模板。
 
-| 数据 | 数量 | ToM 阶数 | 用途 |
-| --- | ---: | --- | --- |
-| Symbolic counterfactual train | 3,200 | 1–3 | RFT / GRPO 训练 |
-| Symbolic counterfactual dev | 400 | 1–3 | 训练阶数范围内评测 |
-| Hi-ToM 4-order OOD | 600 | 4 | 未见阶数外推与反事实过程评测 |
-| Hi-ToM benchmark | 600 | 4 | 最终答案 Accuracy |
-| ExploreToM benchmark | 1,053 | 1–2 | 跨数据生成机制的最终答案 Accuracy |
+## 主要结果
 
-Symbolic 数据中的 `observed` 和 `hidden` 样本按 pair 组织。训练集、dev 和四阶 OOD
-分别包含 1,600、200 和 300 个 pair。固定 few-shot 只包含 1–3 阶示例。
-
-主要数据目录：
-
-- `data/counterfactual_process_reward_v4_natural/`：CoT数据集。
-- `data/rft/derived_v3_fewshot/`：RFT 使用的固定 split。
-- `data/rft/hitom_order4/`：Hi-ToM 四阶 answer-only benchmark。
-
-## 最终评测结果
-
-评测产物位于 [`runs/20260821-qwen25-3b-k16`](runs/20260821-qwen25-3b-k16)。
-表中 `Base`、`RFT` 和 `GRPO` 分别表示基础模型、rejection-sampling fine-tuning
-checkpoint，以及从 RFT checkpoint 继续训练得到的 GRPO checkpoint。
+以下结果来自同一组deterministic compact-prompt评测。Base、RFT和GRPO使用完全相同的
+样本ID、prompt哈希和process target；生成参数为`temperature=0`、`n=1`、
+`max_new_tokens=384`。Answer Accuracy通过本地规则比较最终`Answer:`和标准答案，评测过程
+不调用LLM Judge。
 
 ### Answer Accuracy
 
-| 数据集 | 样本数 | Base | RFT | GRPO |
-| --- | ---: | ---: | ---: | ---: |
-| dev（1–3 阶） | 400 | 4.50% | 10.25% | **66.50%** |
-| Hi-ToM 4-order OOD | 600 | 6.17% | 10.33% | **47.67%** |
-| Hi-ToM benchmark | 600 | 36.33% | 38.00% | **44.50%** |
-| ExploreToM benchmark | 1,053 | 38.22% | 41.31% | **46.06%** |
+|数据集|样本数|Base|RFT|GRPO|
+|---|---:|---:|---:|---:|
+|测试集|400|0.75%（3/400）|12.50%（50/400）|**59.50%（238/400）**|
+|Hi-ToM 4阶OOD数据集|600|0.00%（0/600）|4.67%（28/600）|**28.50%（171/600）**|
 
-Hi-ToM 和 ExploreToM benchmark 只比较模型 的最终 `answer` 与
-`gold_answer`；不对官方数据未提供的中间 belief trace 计分。
+测试集上的分阶结果如下：
 
-### Process Metrics
+|ToM阶数|样本数|Base|RFT|GRPO|
+|---:|---:|---:|---:|---:|
+|1阶|100|3.00%|31.00%|**82.00%**|
+|2阶|200|0.00%|6.50%|**55.00%**|
+|3阶|100|0.00%|6.00%|**46.00%**|
 
-| 数据 | 模型 | Mean reward | 完整 belief trace | Full reward | Pair accuracy | Parse rate |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| dev | Base | 0.274 | 0.25% | 0.00% | 0.00% | 88.25% |
-| dev | RFT | 0.327 | 2.25% | 1.50% | 1.50% | 95.00% |
-| dev | GRPO | **0.812** | **64.50%** | **61.00%** | **40.50%** | **100.00%** |
-| Hi-ToM 4-order OOD | Base | 0.227 | 0.00% | 0.00% | 0.00% | 95.00% |
-| Hi-ToM 4-order OOD | RFT | 0.256 | 0.33% | 0.00% | 0.33% | 97.33% |
-| Hi-ToM 4-order OOD | GRPO | **0.634** | **27.00%** | **15.83%** | **16.67%** | **99.00%** |
+相较RFT，GRPO在测试集上提升`47.00`个百分点，在Hi-ToM 4阶OOD数据集上提升`23.83`个百分点。训练阶数范围内的1阶、2阶和3阶任务均有明显提升；在训练阶段未出现的4阶任务上，GRPO仍达到`28.50%`，但与测试集之间仍存在明显的高阶外推差距。
 
-### Shortcut 与输出稳定性
+当前结果来自单次训练和单个checkpoint，尚未报告多seed均值与方差。
 
-| 数据 | 模型 | Shortcut copy | Last-mention copy | EOS rate | Length P95 |
-| --- | --- | ---: | ---: | ---: | ---: |
-| dev | Base | 12.67% | 28.50% | 88.25% | 256 |
-| dev | RFT | 9.00% | 14.50% | 95.00% | 255.05 |
-| dev | GRPO | **0.00%** | **0.25%** | **100.00%** | **89** |
-| Hi-ToM 4-order OOD | Base | 7.50% | 15.83% | 94.67% | 256 |
-| Hi-ToM 4-order OOD | RFT | 7.50% | 7.83% | 97.33% | 199.15 |
-| Hi-ToM 4-order OOD | GRPO | **0.00%** | **0.17%** | **99.00%** | **132** |
+### Process Reward与格式率
 
-对应指标文件：
+下表中的process reward对应评测文件里的`mean_process_reward`。这是不调用LLM Judge的rule-only分数：Judge reasoning分固定为`0`，本地规则只根据每步`State`和最终`Answer`计分，
+完全正确输出的理论最高分为`0.52`。因此该分数只能在本表的相同评测协议内比较，不能直接
+等同于GRPO训练时包含Judge reasoning的连续reward。
 
-- [`base_eval`](runs/20260821-qwen25-3b-k16/base_eval)
-- [`rft_eval`](runs/20260821-qwen25-3b-k16/rft_eval)
-- [`grpo_eval`](runs/20260821-qwen25-3b-k16/grpo_eval)
+|数据集|模型|Rule-only process reward|Strict format rate|
+|---|---|---:|---:|
+|测试集|Base|0.0016|4.00%|
+|测试集|RFT|0.0774|25.00%|
+|测试集|GRPO|**0.3406**|**99.75%**|
+|Hi-ToM 4阶OOD数据集|Base|0.0013|3.33%|
+|Hi-ToM 4阶OOD数据集|RFT|0.0136|0.00%|
+|Hi-ToM 4阶OOD数据集|GRPO|**0.1359**|**90.67%**|
 
-## Process Reward
+GRPO的提升不只体现在最终答案上：测试集的strict format rate从RFT的`25.00%`提升到`99.75%`，Hi-ToM 4阶OOD数据集从`0.00%`提升到`90.67%`；rule-only process reward也在
+两个数据集上同步提高。四阶结果仍明显低于测试集，说明格式泛化已经较稳定，但高阶信念状态
+传播仍是主要瓶颈。
 
-对于 `nested_belief` 输出，reward 由以下部分组成：
+评测产物：
 
-| 组件 | 权重 |
-| --- | ---: |
-| 最终 `answer` | 0.20 |
-| `belief_trace` | 0.48 |
-| statues | 0.32 |
+- [Base评测](runs/base_eval/20260828-qwen25-3b-natural-v2-k16)
+- [RFT评测](runs/rft_eval/20260828-qwen25-3b-natural-v2-k16)
+- [GRPO评测](runs/grpo_eval/20260828-qwen25-3b-natural-v2-k16)
 
-`belief_trace` 按正确 step 比例给分；`answer` 分只在所有status正确且最终答案正确时发放。
+## 数据
+
+当前训练与评测数据采用observed/hidden反事实pair。每个pair共享故事和查询，只改变关键事件
+是否被目标角色观察，用于检验模型是否真正追踪不同角色的知识状态。
+
+|数据集|样本数|Pair数|ToM阶数|用途|
+|---|---:|---:|---|---|
+|训练集|3,200|1,600|1–3阶|RFT候选采样与GRPO训练|
+|测试集|400|200|1–3阶|训练阶数范围内评测|
+|Hi-ToM 4阶OOD数据集|600|300|4阶|未见阶数外推评测|
+
+主要数据目录：
+
+- `data/counterfactual_process_reward_v4_natural/`：自然语言CoT源数据，保留可审计的`judge_prompt`和结构化`process_target`，不包含`process_response`。
+- `data/counterfactual_process_reward_v4_natural_compact/`：物化后的compact-prompt JSONL。
+- `data/grpo/counterfactual_process_reward_v4_natural_compact/`：verl读取的Parquet数据。
+- `data/rft/derived_v3_fewshot/`：RFT使用的固定train/dev/test split。
+
+compact数据的manifest记录样本数、pair数、阶数分布、prompt版本和文件SHA256。训练集只包含1–3阶样本；Hi-ToM 4阶OOD数据集全部为4阶样本。
+
+## 训练流程
+
+```text
+反事实数据构建
+      ↓
+Base模型K次采样
+      ↓
+本地State+Answer严格筛选
+      ↓
+RFT response-only训练
+      ↓
+compact-prompt数据构建
+      ↓
+RFT actor + frozen RFT reference
+      ↓
+LLM-as-a-Judge GRPO
+      ↓
+deterministic评测
+```
+
+### RFT
+
+RFT对基础模型采样多个候选，只接受同时满足以下条件的轨迹：
+
+- `Think`数量和编号与目标ToM阶数一致；
+- 每个`State`都正确；
+- 最终`Answer`正确；
+- 输出结构完整并正常到达EOS。
+
+默认筛选完全由本地规则完成，不调用LLM Judge。训练采用response-only loss，prompt token全部mask，只优化通过筛选的模型自生成response和EOS，不使用gold`process_response`回填。
+
+RFT详细命令、采样审计和dataset builder说明见[rft/README.md](rft/README.md)。
+
+### GRPO
+
+GRPO从RFT checkpoint开始，actor和frozen reference在启动时指向同一个RFT模型。每个训练prompt采样16条response，由本地规则和`deepseek-v4-flash`共同评分：
+
+- 本地规则检查`Think`数量、渐进式结构、每步`State`和最终`Answer`；
+- LLM Judge只评价每步自然语言reasoning，默认关闭thinking模式；
+- 一个prompt及其16条response打包为一次Judge请求；
+- GRPO在同一prompt的16条response内计算相对优势。
+
+当前默认reward权重为过程质量`0.75`、渐进式结构`0.05`、最终答案`0.20`。过程质量中每步`State`占`0.40`，Judge reasoning占`0.60`。只有所有`State`与最终`Answer`同时正确时，
+才发放完整答案奖励。
+
+GRPO详细配置、恢复训练和指标说明见[grpo/README.md](grpo/README.md)。
 
 ## 环境安装
 
-在项目根目录运行：
+正式GRPO训练要求Linux、NVIDIA GPU和CUDA 12.1。推荐Python 3.10与A800 80GB或同等级GPU。
 
 ```bash
-conda create -n robusttom-grpo python=3.10 -y
-conda activate robusttom-grpo
+conda create -n robusttom python=3.10 pip -y
+conda activate robusttom
 
 python -m pip install --upgrade pip setuptools wheel
-python -m pip install torch==2.4.0
+python -m pip install torch==2.4.0 --index-url https://download.pytorch.org/whl/cu121
 python -m pip install -r requirements.txt
 python -m pip install flash-attn==2.7.0.post2 --no-build-isolation
 python -m pip install -e . --no-deps
 ```
 
-RFT 可以使用独立环境：
+RFT可以使用独立环境：
 
 ```bash
 conda create -n robusttom-rft python=3.10 -y
 conda activate robusttom-rft
+python -m pip install --upgrade pip setuptools wheel
 python -m pip install -r rft/requirements.txt
 python -m pip install flash-attn==2.6.3 --no-build-isolation
 ```
 
-## RFT
+macOS可用于数据构建、本地reward测试和结果分析，但不能运行vLLM/flash-attn训练链路。
 
-### 1. 候选采样
+## RFT复现
+
+以下命令展示compact-prompt RFT主流程。完整训练集采样成本为`3,200×16=51,200`条response，
+建议先使用`data/rft/pilot_v2/train.jsonl`完成链路验证。
 
 ```bash
-RUN_ID=20260821-qwen25-3b-k16
-MODEL=Qwen/Qwen2.5-3B-Instruct
+export RUN_ID=20260828-qwen25-3b-natural-v2-k16
+export MODEL=Qwen/Qwen2.5-3B-Instruct
 
-CUDA_VISIBLE_DEVICES=0 python -m rft.sample \
-  --data data/rft/derived_v3_fewshot/train.jsonl \
-  --model "${MODEL}" \
-  --output "runs/rft_sampling/${RUN_ID}/candidates.jsonl" \
+python -m rft.sample \
+  --data data/rft/pilot_v2/train.jsonl \
+  --model "$MODEL" \
+  --output "runs/sampling/$RUN_ID/candidates.jsonl" \
   --num-samples 16 \
   --temperature 0.8 \
   --top-p 0.95 \
-  --max-new-tokens 256 \
+  --max-new-tokens 384 \
+  --gpu-memory-utilization 0.85 \
   --seed 2026
-```
 
-### 2. 筛选与训练
-
-```bash
 python -m rft.score_candidates \
-  --candidates "runs/rft_sampling/${RUN_ID}/candidates.jsonl" \
-  --data data/rft/derived_v3_fewshot/train.jsonl \
-  --output "runs/rft_sampling/${RUN_ID}/scored.jsonl"
+  --candidates "runs/sampling/$RUN_ID/candidates.jsonl" \
+  --data data/rft/pilot_v2/train.jsonl \
+  --output "runs/sampling/$RUN_ID/scored.jsonl"
 
 python -m rft.build_dataset \
-  --scored "runs/rft_sampling/${RUN_ID}/scored.jsonl" \
-  --output "data/rft/accepted/${RUN_ID}/train.jsonl" \
+  --scored "runs/sampling/$RUN_ID/scored.jsonl" \
+  --output "data/rft/accepted/$RUN_ID/train.jsonl" \
   --min-samples 0 \
   --max-samples 3000 \
-  --seed 2026
+  --seed 2026 \
+  --compact-prompt
 
 CUDA_VISIBLE_DEVICES=0 python -m rft.train \
-  --model "${MODEL}" \
-  --train-file "data/rft/accepted/${RUN_ID}/train.jsonl" \
-  --output-dir "runs/rft_train/${RUN_ID}" \
+  --model "$MODEL" \
+  --train-file "data/rft/accepted/$RUN_ID/train.jsonl" \
+  --output-dir "runs/rft_train/$RUN_ID" \
+  --logging-dir "runs/rft_train/$RUN_ID/tensorboard" \
   --max-seq-length 2048 \
   --per-device-train-batch-size 2 \
   --gradient-accumulation-steps 16 \
   --num-train-epochs 1 \
   --learning-rate 1e-5 \
+  --warmup-ratio 0.03 \
+  --weight-decay 0.01 \
   --seed 2026
 ```
 
-详细说明见 [`rft/README.md`](rft/README.md)。
+## GRPO复现
 
-## GRPO
-
-设置 RFT checkpoint 和运行目录：
+首先配置RFT checkpoint、数据目录、输出目录和Judge API：
 
 ```bash
-export RFT_MODEL_PATH=/path/to/rft_checkpoint/final
-export GRPO_RUN_DIR=/path/to/grpo_run
-export GRPO_DATA_DIR=/path/to/grpo_data
-export GRPO_LOG_DIR="${GRPO_RUN_DIR}/logs"
+export RFT_MODEL_PATH=/root/autodl-tmp/runs/rft_train/20260828-qwen25-3b-natural-v2-k16/final
+export RAW_DATA_DIR=/root/RobustToM-LLM/data/counterfactual_process_reward_v3
+export NATURAL_SOURCE_DIR=/root/autodl-tmp/data/counterfactual_process_reward_v4_natural_compact
+export GRPO_DATA_DIR=/root/autodl-tmp/data/grpo/counterfactual_process_reward_v4_natural_compact
+export GRPO_OUTPUT_ROOT=/root/autodl-tmp/runs/grpo
+export GRPO_LOG_DIR=/root/autodl-tmp/runs/grpo/logs
+
+export HF_HOME=/root/autodl-tmp/huggingface
+export HF_HUB_CACHE=/root/autodl-tmp/huggingface/hub
+export HF_ENDPOINT=https://hf-mirror.com
+export WANDB_DIR=/root/autodl-tmp/wandb
+export WANDB_CACHE_DIR=/root/autodl-tmp/cache/wandb
+export RAY_TMPDIR=/root/autodl-tmp/tmp/ray
+export TMPDIR=/root/autodl-tmp/tmp
+
+export DEEPSEEK_API_KEY=your-key
 ```
 
-依次执行数据构建、配置验证、smoke test、pilot 和正式训练：
+按顺序执行：
 
 ```bash
-bash grpo/run_grpo_v3.sh build
-bash grpo/run_grpo_v3.sh validate
-bash grpo/run_grpo_v3.sh smoke
-bash grpo/run_grpo_v3.sh pilot
-bash grpo/run_grpo_v3.sh train
+bash grpo/run_grpo_natural.sh build
+bash grpo/run_grpo_natural.sh validate
+bash grpo/run_grpo_natural.sh smoke
+bash grpo/run_grpo_natural.sh pilot
+bash grpo/run_grpo_natural.sh train
 ```
 
-正式训练配置为：8 prompts/step、16 rollouts/prompt、800 optimizer steps、
-2 epochs、learning rate `5e-7`、temperature `1.0`，PPO ratio clip 为 `[0.8, 1.3]`。
+默认正式训练配置：
 
-详细环境变量、恢复训练方式和 A800 运行流程见 [`grpo/README.md`](grpo/README.md)。
+|参数|值|
+|---|---:|
+|训练batch|8个prompt|
+|每个prompt的rollout数|16|
+|每步response数|128|
+|训练步数|800|
+|Epoch|2|
+|Actor learning rate|`5e-7`|
+|最大response长度|384|
+|Judge并发数|8|
+|Checkpoint间隔|400步|
+|本地规则验证间隔|50步|
 
-## 评测
+配置文件位于`verl/trainer/config/robust_tom_natural_grpo.yaml`。训练日志默认同时写入console和Weights & Biases。将`WANDB_MODE=offline`导出到环境变量可使用离线模式。
 
-### 过程指标
+## 评测复现
+
+下面以任意一个Base、RFT或GRPO Hugging Face checkpoint为例。由于训练使用compact prompt，
+生成和评测都必须传入`--compact-prompt`。
 
 ```bash
+export MODEL=/path/to/model
+export EVAL_DIR=runs/eval/example
+
 python -m rft.generate \
-  --data data/rft/derived_v3_fewshot/dev.jsonl \
-  --model /path/to/checkpoint \
-  --output runs/eval/dev_predictions.jsonl \
-  --max-new-tokens 256 \
-  --seed 2026
-
-python -m rft.evaluate \
-  --predictions runs/eval/dev_predictions.jsonl \
-  --data data/rft/derived_v3_fewshot/dev.jsonl \
-  --output runs/eval/dev_metrics.json
-```
-
-### 最终答案 Accuracy
-
-```bash
-python -m rft.generate \
-  --data data/rft/hitom_order4/test.jsonl \
-  --model /path/to/checkpoint \
-  --output runs/eval/hitom_predictions.jsonl \
+  --data data/counterfactual_process_reward_v4_natural/val.jsonl \
+  --model "$MODEL" \
+  --output "$EVAL_DIR/dev_predictions.jsonl" \
+  --backend vllm \
   --max-new-tokens 384 \
-  --seed 2026
+  --seed 2026 \
+  --compact-prompt
 
 python -m rft.evaluate \
-  --predictions runs/eval/hitom_predictions.jsonl \
-  --data data/rft/hitom_order4/test.jsonl \
-  --output runs/eval/hitom_metrics.json \
-  --answer-only
+  --predictions "$EVAL_DIR/dev_predictions.jsonl" \
+  --data data/counterfactual_process_reward_v4_natural/val.jsonl \
+  --output "$EVAL_DIR/dev_rule_metrics.json" \
+  --compact-prompt
+
+python -m rft.generate \
+  --data data/counterfactual_process_reward_v4_natural/test.jsonl \
+  --model "$MODEL" \
+  --output "$EVAL_DIR/test_predictions.jsonl" \
+  --backend vllm \
+  --max-new-tokens 384 \
+  --seed 2026 \
+  --compact-prompt
+
+python -m rft.evaluate \
+  --predictions "$EVAL_DIR/test_predictions.jsonl" \
+  --data data/counterfactual_process_reward_v4_natural/test.jsonl \
+  --output "$EVAL_DIR/test_rule_metrics.json" \
+  --compact-prompt
 ```
 
 ## 项目结构
 
 ```text
-RobustToM-RL/
-├── data/       # 原始、反事实、RFT、GRPO 与 benchmark 数据
-├── grpo/       # verl GRPO 适配、配置、reward 与运行脚本
-├── rft/        # 候选采样、筛选、response-only 训练与评测
-├── scripts/    # 数据生成、few-shot 和 process-target 工具
-├── runs/       # 训练与评测产物
-└── tests/      # 项目测试
+RobustToM-LLM/
+├── data/       #反事实数据、compact JSONL、RFT split与GRPO Parquet
+├── grpo/       #GRPO数据适配、RewardManager、指标与运行脚本
+├── rft/        #采样、筛选、response-only训练与deterministic评测
+├── scripts/    #反事实数据生成、compact数据和LLM Judge reward
+├── verl/       #项目内适配的verl训练代码
+├── runs/       #采样与评测产物
+└── tests/      #回归测试
 ```
 
-## 数据来源与依赖
+## 测试
 
-- [Qwen2.5](https://huggingface.co/collections/Qwen/qwen25-66e81a666513e518adb90d9e)
-- [Hi-ToM](https://github.com/ying-hui-he/Hi-ToM_dataset)
-- [ExploreToM](https://github.com/facebookresearch/ExploreToM)
-- [verl](https://github.com/volcengine/verl)
+```bash
+pytest -q rft/tests tests
+```
 
-项目代码许可证见 [`LICENSE`](LICENSE)。外部数据集继续受各自许可证约束；
-ExploreToM 官方样本使用 CC BY-NC 4.0。
+## 数据与许可证
+
+- 基础模型：[Qwen2.5](https://huggingface.co/collections/Qwen/qwen25-66e81a666513e518adb90d9e)
+- 数据设计参考：[Hi-ToM](https://github.com/ying-hui-he/Hi-ToM_dataset)
+- 数据设计参考：[ExploreToM](https://github.com/facebookresearch/ExploreToM)
+- RL训练框架：[verl](https://github.com/volcengine/verl)
+
+项目代码许可证见[LICENSE](LICENSE)。第三方模型、框架和数据继续受各自许可证约束。
