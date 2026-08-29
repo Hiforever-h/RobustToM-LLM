@@ -380,10 +380,18 @@ class RewardConfig:
     answer_weight: float = 0.2
     state_weight_within_step: float = 0.4
     reasoning_weight_within_step: float = 0.6
+    # Keep this last so existing positional RewardConfig(...) calls preserve
+    # the pre-structure argument order.
+    structure_weight: float = 0.0
 
     def __post_init__(self) -> None:
-        if abs(self.process_weight + self.answer_weight - 1.0) > 1e-9:
-            raise ValueError("process_weight + answer_weight must equal 1")
+        if (
+            abs(self.process_weight + self.answer_weight + self.structure_weight - 1.0)
+            > 1e-9
+        ):
+            raise ValueError(
+                "process_weight + answer_weight + structure_weight must equal 1"
+            )
         if (
             abs(self.state_weight_within_step + self.reasoning_weight_within_step - 1.0)
             > 1e-9
@@ -391,6 +399,56 @@ class RewardConfig:
             raise ValueError("state and reasoning weights within a step must equal 1")
         if min(asdict(self).values()) < 0:
             raise ValueError("Reward weights must be non-negative")
+
+
+def score_structure_progress(rule_result: Mapping[str, Any]) -> dict[str, Any]:
+    """Score dense progress toward the exact Think/State response structure.
+
+    Seventy percent follows the longest consecutive valid prefix so an order-3
+    response can improve from one to two to three blocks. The remaining thirty
+    percent requires the parser's complete strict structure. Merely emitting
+    Think markers is insufficient: every prefix block needs non-empty reasoning,
+    exactly one State value, and no content after State.
+    """
+    parsed = rule_result.get("parsed")
+    if not isinstance(parsed, Mapping):
+        raise ValueError("rule_result.parsed must be a mapping")
+    expected = parsed.get("expected_step_count")
+    steps = parsed.get("steps")
+    checks = parsed.get("checks")
+    if type(expected) is not int or expected < 1:
+        raise ValueError("parsed.expected_step_count must be positive")
+    if not isinstance(steps, list) or not isinstance(checks, Mapping):
+        raise ValueError("parsed steps/checks are invalid")
+
+    valid_prefix_count = 0
+    for expected_index, step in enumerate(steps[:expected], start=1):
+        if not isinstance(step, Mapping) or step.get("index") != expected_index:
+            break
+        reasoning = step.get("reasoning")
+        state = step.get("state")
+        if (
+            not isinstance(reasoning, str)
+            or not reasoning.strip()
+            or step.get("state_count") != 1
+            or not isinstance(state, str)
+            or not state.strip()
+            or bool(step.get("content_after_state"))
+        ):
+            break
+        valid_prefix_count += 1
+
+    prefix_fraction = valid_prefix_count / expected
+    strict_structure = bool(checks.get("structure_ok")) and (
+        valid_prefix_count == expected
+    )
+    format_progress = 0.7 * prefix_fraction + 0.3 * float(strict_structure)
+    return {
+        "valid_structure_prefix_count": valid_prefix_count,
+        "valid_structure_prefix_fraction": round(prefix_fraction, 10),
+        "strict_structure": strict_structure,
+        "format_progress": round(format_progress, 10),
+    }
 
 
 def _validate_reasoning_scores(scores: Sequence[Any], step_count: int) -> list[float]:
@@ -437,16 +495,20 @@ def combine_reward(
         for state_ok, effective_score in zip(state_correct, effective_scores)
     ]
     process_reward = sum(step_rewards) / len(step_rewards)
+    structure = score_structure_progress(rule_result)
+    structure_bonus = config.structure_weight * float(structure["format_progress"])
     answer_bonus = (
         config.answer_weight
         if bool(rule_result["answer_correct"]) and all(state_correct)
         else 0.0
     )
-    total = config.process_weight * process_reward + answer_bonus
+    total = config.process_weight * process_reward + structure_bonus + answer_bonus
     return {
         "reward": round(total, 10),
         "process_reward": round(process_reward, 10),
         "answer_bonus": round(answer_bonus, 10),
+        **structure,
+        "structure_bonus": round(structure_bonus, 10),
         "step_rewards": [round(value, 10) for value in step_rewards],
         "reasoning_scores": scores,
         "effective_reasoning_scores": effective_scores,
@@ -906,9 +968,7 @@ def score_rule_only_group(
     """Score one group deterministically without constructing a Judge client."""
     config = reward_config or RewardConfig()
     records: list[dict[str, Any]] = []
-    for candidate_id, response in zip(
-        group.resolved_candidate_ids(), group.responses
-    ):
+    for candidate_id, response in zip(group.resolved_candidate_ids(), group.responses):
         rule = score_rule_components(response, group.target)
         combined = combine_reward(
             rule,

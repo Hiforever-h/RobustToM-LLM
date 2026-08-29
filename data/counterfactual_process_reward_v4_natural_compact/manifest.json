@@ -1,0 +1,55 @@
+{
+  "name": "RobustToM natural-CoT v4 compact source data",
+  "prompt_version": "natural-cot-think-state-v3-compact",
+  "compact_prompt": true,
+  "numeric_tom_order_exposed_to_actor": false,
+  "contains_process_response": false,
+  "event_numbers_removed": true,
+  "multiline_actor_prompts": true,
+  "single_line_judge_prompts": true,
+  "splits": {
+    "train": {
+      "count": 3200,
+      "pair_count": 1600,
+      "order_counts": {
+        "3": 896,
+        "2": 1504,
+        "1": 800
+      },
+      "intervention_counts": {
+        "observed": 1600,
+        "hidden": 1600
+      },
+      "input_sha256": "3089d6e54209e8a323405f88b903cf3e456eed48051f73a6dd8caf4ebd5977d5",
+      "output_sha256": "b150f4b621075d156b34e3908ebaaa7b8a017fb969bb40d5359e8e2d7ff1c024"
+    },
+    "val": {
+      "count": 400,
+      "pair_count": 200,
+      "order_counts": {
+        "3": 100,
+        "2": 200,
+        "1": 100
+      },
+      "intervention_counts": {
+        "hidden": 200,
+        "observed": 200
+      },
+      "input_sha256": "2f0c90621cbbd4cce2422e987a654843db1a20d825ee3a24c7c5d352fc121258",
+      "output_sha256": "824d28903ec782e12cfb708c2d3bca14ba0440b6aa3b1919ff56ebd4f28320ea"
+    },
+    "test": {
+      "count": 600,
+      "pair_count": 300,
+      "order_counts": {
+        "4": 600
+      },
+      "intervention_counts": {
+        "observed": 300,
+        "hidden": 300
+      },
+      "input_sha256": "b9e731723bd385dd30459c488d4e90b6d6a0372fa5e034431970c45bde1d6388",
+      "output_sha256": "7df5b07750641a7dc072804146d94929629d99e64e6b9214f36de7cea7225b77"
+    }
+  }
+}

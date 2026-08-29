@@ -74,6 +74,15 @@ def _natural_metrics(
         f"{prefix}/answer_bonus_mean": _mean(
             float(result["answer_bonus"]) for result in combined
         ),
+        f"{prefix}/structure_bonus_mean": _mean(
+            float(result["structure_bonus"]) for result in combined
+        ),
+        f"{prefix}/format_progress_mean": _mean(
+            float(result["format_progress"]) for result in combined
+        ),
+        f"{prefix}/valid_structure_prefix_fraction_mean": _mean(
+            float(result["valid_structure_prefix_fraction"]) for result in combined
+        ),
         f"{prefix}/structure_valid_rate": _mean(structure_ok),
         f"{prefix}/state_step_accuracy": _mean(state_flags),
         f"{prefix}/all_states_correct_rate": _mean(all_states_correct),

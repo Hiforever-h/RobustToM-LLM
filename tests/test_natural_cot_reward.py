@@ -15,6 +15,7 @@ from scripts.reward import (
     normalize_judge_output,
     parse_response,
     score_rule_components,
+    score_structure_progress,
 )
 
 
@@ -115,9 +116,55 @@ class NaturalCoTRewardTest(unittest.TestCase):
 
     def test_default_reward_formula(self):
         rule = score_rule_components(self.valid_response(), self.target())
-        self.assertEqual(combine_reward(rule, [1.0, 1.0, 1.0])["reward"], 1.0)
+        full = combine_reward(rule, [1.0, 1.0, 1.0])
+        self.assertEqual(full["reward"], 1.0)
+        self.assertEqual(full["structure_bonus"], 0.0)
         self.assertEqual(combine_reward(rule, [0.5, 0.5, 0.5])["reward"], 0.76)
         self.assertEqual(combine_reward(rule, [0.0, 0.0, 0.0])["reward"], 0.52)
+
+    def test_grpo_structure_reward_is_dense_and_resists_marker_spam(self):
+        config = RewardConfig(
+            process_weight=0.75,
+            answer_weight=0.2,
+            structure_weight=0.05,
+        )
+
+        def wrong_response(step_count: int, reasoning: str = "A real explanation."):
+            blocks = [
+                f"Think {index}:\n{reasoning}\nState: glass_case"
+                for index in range(1, step_count + 1)
+            ]
+            return "\n".join([*blocks, "Answer: glass_case"])
+
+        rewards = []
+        for step_count in (1, 2, 3):
+            rule = score_rule_components(wrong_response(step_count), self.target())
+            combined = combine_reward(rule, [1.0, 1.0, 1.0], config)
+            rewards.append(combined["reward"])
+        self.assertAlmostEqual(rewards[0], 0.05 * 0.7 / 3)
+        self.assertAlmostEqual(rewards[1], 0.05 * 0.7 * 2 / 3)
+        self.assertAlmostEqual(rewards[2], 0.05)
+
+        extra_rule = score_rule_components(wrong_response(4), self.target())
+        extra = combine_reward(extra_rule, [1.0, 1.0, 1.0], config)
+        self.assertAlmostEqual(extra["structure_bonus"], 0.05 * 0.7)
+        self.assertLess(extra["reward"], rewards[2])
+
+        empty_rule = score_rule_components(wrong_response(3, ""), self.target())
+        empty_structure = score_structure_progress(empty_rule)
+        self.assertEqual(empty_structure["valid_structure_prefix_count"], 0)
+        self.assertEqual(empty_structure["format_progress"], 0.0)
+
+    def test_reward_weights_include_opt_in_structure_component(self):
+        legacy_positional = RewardConfig(0.8, 0.2, 0.4, 0.6)
+        self.assertEqual(legacy_positional.structure_weight, 0.0)
+
+        with self.assertRaisesRegex(ValueError, "structure_weight"):
+            RewardConfig(
+                process_weight=0.8,
+                answer_weight=0.2,
+                structure_weight=0.05,
+            )
 
     def test_continuous_reasoning_scores_are_supported(self):
         rule = score_rule_components(self.valid_response(), self.target())
@@ -161,14 +208,10 @@ class NaturalCoTRewardTest(unittest.TestCase):
 
     def test_judge_output_accepts_continuous_scores(self):
         payload = {
-            "evaluations": [
-                {"candidate_id": "c00", "reasoning_scores": [0.73, 0.88]}
-            ]
+            "evaluations": [{"candidate_id": "c00", "reasoning_scores": [0.73, 0.88]}]
         }
         result = normalize_judge_output(payload, ["c00"], 2)
-        self.assertEqual(
-            result["evaluations"][0]["reasoning_scores"], [0.73, 0.88]
-        )
+        self.assertEqual(result["evaluations"][0]["reasoning_scores"], [0.73, 0.88])
 
     def test_multiple_answers_do_not_receive_answer_credit(self):
         response = self.valid_response() + "\nAnswer: brass_locker"

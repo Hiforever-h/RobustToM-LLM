@@ -13,8 +13,8 @@ fi
 
 CONFIG_NAME="${GRPO_CONFIG_NAME:-robust_tom_natural_grpo}"
 RAW_DATA_DIR="${RAW_DATA_DIR:-data/counterfactual_process_reward_v3}"
-NATURAL_SOURCE_DIR="${NATURAL_SOURCE_DIR:-data/counterfactual_process_reward_v4_natural}"
-DATA_DIR="${GRPO_DATA_DIR:-data/grpo/counterfactual_process_reward_v4_natural}"
+NATURAL_SOURCE_DIR="${NATURAL_SOURCE_DIR:-data/counterfactual_process_reward_v4_natural_compact}"
+DATA_DIR="${GRPO_DATA_DIR:-data/grpo/counterfactual_process_reward_v4_natural_compact}"
 MODEL_PATH="${RFT_MODEL_PATH:-runs/final}"
 OUTPUT_ROOT="${GRPO_OUTPUT_ROOT:-runs/grpo}"
 LOG_DIR="${GRPO_LOG_DIR:-${OUTPUT_ROOT}/logs}"
@@ -29,7 +29,7 @@ usage() {
 Usage: bash grpo/run_grpo_natural.sh MODE [Hydra overrides...]
 
 Modes:
-  build      Build natural-CoT JSONL and audited parquet files. No GPU/Judge.
+  build      Build compact natural-CoT JSONL and audited parquet files. No GPU/Judge.
   validate   Generate the validation split and run deterministic rule metrics.
              No Judge request and no optimizer update.
   smoke      Run one optimizer step with 1 prompt x 2 rollouts and a real Judge.
@@ -39,8 +39,8 @@ Modes:
 Important environment variables:
   RFT_MODEL_PATH       Actor/reference checkpoint (default: runs/final)
   RAW_DATA_DIR         Symbolic v3 JSONL input directory
-  NATURAL_SOURCE_DIR   Generated natural-CoT JSONL directory
-  GRPO_DATA_DIR        Generated parquet directory
+  NATURAL_SOURCE_DIR   Generated compact natural-CoT JSONL directory
+  GRPO_DATA_DIR        Generated compact parquet directory
   GRPO_OUTPUT_ROOT     Checkpoint/output root
   GRPO_LOG_DIR         Terminal log directory
   DEEPSEEK_API_KEY     Required by smoke, pilot and train (or set it in .env)
@@ -88,7 +88,8 @@ build_data() {
         --source-output-dir "${NATURAL_SOURCE_DIR}" \
         --parquet-output-dir "${DATA_DIR}" \
         --tokenizer "${MODEL_PATH}" \
-        --max-prompt-length 2048
+        --max-prompt-length 2048 \
+        --compact-prompt
 }
 
 run_trainer() {
@@ -114,7 +115,7 @@ case "${MODE}" in
         build_data
         ;;
     validate)
-        run_trainer natural_cot_validate \
+        run_trainer compact_natural_cot_validate \
             trainer.val_only=true \
             trainer.resume_from_path=null \
             trainer.logger='[console]' \
@@ -123,7 +124,7 @@ case "${MODE}" in
         ;;
     smoke)
         require_judge_credentials
-        run_trainer natural_cot_smoke \
+        run_trainer compact_natural_cot_smoke \
             data.train_batch_size=1 \
             actor_rollout_ref.rollout.n=2 \
             actor_rollout_ref.actor.ppo_mini_batch_size=2 \
@@ -144,7 +145,7 @@ case "${MODE}" in
         ;;
     pilot)
         require_judge_credentials
-        run_trainer natural_cot_pilot_n16_seed2026 \
+        run_trainer compact_natural_cot_pilot_n16_seed2026 \
             trainer.total_epochs=1 \
             trainer.total_training_steps=50 \
             trainer.val_before_train=true \
@@ -156,7 +157,7 @@ case "${MODE}" in
         ;;
     train)
         require_judge_credentials
-        run_trainer qwen25_3b_natural_cot_judge_n16_seed2026 "$@"
+        run_trainer qwen25_3b_compact_natural_cot_judge_n16_seed2026 "$@"
         ;;
     help|-h|--help)
         usage

@@ -1,7 +1,8 @@
 # RobustToM natural-CoT GRPO
 
 本目录是 RobustToM 的 GRPO 训练入口。当前主链路不再要求 actor 输出 JSON 或
-`belief_chain`，而是输出轻量自然语言过程：
+`belief_chain`，而是让模型从问题中的嵌套 belief 表达自行判断 ToM 阶数 N，再输出
+轻量自然语言过程：
 
 ```text
 Think 1:
@@ -18,6 +19,12 @@ Answer: ceramic_jar
 训练时，每个 prompt 采样 16 条 response。本地规则负责检查 Think 数量、每步
 `State` 和最终 `Answer`；`deepseek-v4-flash` 只评价每步 reasoning。一个 prompt
 及其 16 条 response 被打包为一次 Judge 请求，默认一个训练 step 的 8 个请求并发执行。
+
+当前 GRPO 总 reward 的权重为：过程质量 0.75、渐进式结构 0.05、最终答案 0.20。
+结构分不会硬性清零格式不完整的响应，而是按从 `Think 1` 开始的连续有效前缀给分：
+每个计入前缀的 block 必须编号连续、包含非空 reasoning、恰好一个 `State`，且
+`State` 后没有多余内容。前缀进度占结构分的 70%，完整严格结构占 30%。因此高阶
+响应可以从一块逐步学习到两块、三块，同时不能只靠堆叠 Think marker 刷分。
 
 旧版 JSON/few-shot 实验仍可通过 `grpo/run_grpo_json_v3.sh` 复现；
 `grpo/run_grpo_v3.sh` 现在是 natural-CoT 脚本的兼容别名。
@@ -57,8 +64,8 @@ conda activate robusttom
 
 export RFT_MODEL_PATH=/root/autodl-tmp/runs/rft_train/20260820-qwen25-3b-k16/final
 export RAW_DATA_DIR=/root/RobustToM-LLM/data/counterfactual_process_reward_v3
-export NATURAL_SOURCE_DIR=/root/autodl-tmp/data/counterfactual_process_reward_v4_natural
-export GRPO_DATA_DIR=/root/autodl-tmp/data/grpo/counterfactual_process_reward_v4_natural
+export NATURAL_SOURCE_DIR=/root/autodl-tmp/data/counterfactual_process_reward_v4_natural_compact
+export GRPO_DATA_DIR=/root/autodl-tmp/data/grpo/counterfactual_process_reward_v4_natural_compact
 export GRPO_OUTPUT_ROOT=/root/autodl-tmp/runs/grpo
 export GRPO_LOG_DIR=/root/autodl-tmp/runs/grpo/logs
 
@@ -98,8 +105,8 @@ bash grpo/run_grpo_natural.sh build
 
 1. 从 `RAW_DATA_DIR` 读取 v3 train/val/test JSONL；
 2. 删除旧 `process_response`、JSON schema、few-shot 和事件编号；
-3. 为每个样本生成 `natural-cot-think-state-v2-exact-order` 多行 actor prompt，
-   明确 ToM 阶数、人物层级和恰好 N 个空 `Think/State` 模板；
+3. 为每个样本生成 `natural-cot-think-state-v3-compact` actor prompt；prompt 只解释
+   N 的含义和输出协议，不注入数字阶数、belief chain 或 N 个空模板；
 4. 生成 natural-CoT source JSONL 到 `NATURAL_SOURCE_DIR`；
 5. 生成 verl parquet 到 `GRPO_DATA_DIR`；
 6. 在 parquet 中显式保存 `judge_prompt` 和隐藏的结构化 process target；
@@ -108,9 +115,13 @@ bash grpo/run_grpo_natural.sh build
 仓库当前已包含一份构建结果：
 
 ```text
-data/counterfactual_process_reward_v4_natural/
-data/grpo/counterfactual_process_reward_v4_natural/
+data/counterfactual_process_reward_v4_natural_compact/
+data/grpo/counterfactual_process_reward_v4_natural_compact/
 ```
+
+其中前一个目录保存可直接审计的 train/val/test JSONL，后一个目录保存 verl 实际读取的
+train/val/test Parquet。需要复现旧 exact-order 数据时，可以直接运行
+`python -m grpo.build_natural_dataset`，不要加 `--compact-prompt`。
 
 ## 4. 推荐执行顺序
 
@@ -186,6 +197,9 @@ steps。每 10 步执行 rule-only validation，每 25 步保存 checkpoint，�
 
 ```text
 reward/structure_valid_rate
+reward/format_progress_mean
+reward/valid_structure_prefix_fraction_mean
+reward/structure_bonus_mean
 reward/state_step_accuracy
 reward/judge_reasoning_step_mean
 reward/answer_correct_process_imperfect_rate
@@ -222,6 +236,7 @@ bash grpo/run_grpo_natural.sh train
 | optimizer steps | 800 |
 | epochs | 2 |
 | learning rate | 5e-7 |
+| process / structure / answer reward | 0.75 / 0.05 / 0.20 |
 | save frequency | 400 |
 | rule-only validation frequency | 50 |
 
@@ -243,7 +258,7 @@ bash grpo/run_grpo_natural.sh train \
 
 ```bash
 bash grpo/run_grpo_natural.sh train \
-  trainer.resume_from_path=/root/autodl-tmp/runs/grpo/qwen25_3b_natural_cot_judge_n16_seed2026/actor/global_step_400
+  trainer.resume_from_path=/root/autodl-tmp/runs/grpo/qwen25_3b_compact_natural_cot_judge_n16_seed2026/actor/global_step_400
 ```
 
 `RFT_MODEL_PATH` 仍然作为 frozen reference；`resume_from_path` 只替换待继续训练的 actor。

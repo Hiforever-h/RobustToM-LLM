@@ -1,0 +1,41 @@
+{
+  "name": "RobustToM natural-CoT v4 compact verl parquet",
+  "prompt_version": "natural-cot-think-state-v3-compact",
+  "compact_prompt": true,
+  "tokenizer": "Qwen/Qwen2.5-3B-Instruct",
+  "max_prompt_length": 2048,
+  "contains_judge_prompt": true,
+  "ground_truth_is_process_target": true,
+  "splits": {
+    "train": {
+      "count": 3200,
+      "pair_count": 1600,
+      "prompt_tokens": {
+        "max": 791,
+        "p95": 733.0,
+        "p99": 751.0
+      },
+      "output_sha256": "9a31ad589b6ad8da734bbc28df777e7eb0ba28ff6598ee2df8ca562a45887179"
+    },
+    "val": {
+      "count": 400,
+      "pair_count": 200,
+      "prompt_tokens": {
+        "max": 740,
+        "p95": 726.0,
+        "p99": 733.05
+      },
+      "output_sha256": "df1a41d4ffb1196fefa641e82f5ec04cb12f7ad0697179c2e02d865ce30c47ed"
+    },
+    "test": {
+      "count": 600,
+      "pair_count": 300,
+      "prompt_tokens": {
+        "max": 783,
+        "p95": 759.05,
+        "p99": 777.01
+      },
+      "output_sha256": "0040345e389648a7ef62ad091c5b261a69ac2d26a10f87b7e6024e0057d0bb41"
+    }
+  }
+}

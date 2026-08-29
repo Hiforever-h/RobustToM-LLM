@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Build the natural-CoT source JSONL and verl parquet dataset.
+"""Build natural-CoT source JSONL and verl parquet datasets.
 
-The actor sees a dynamic exact-order Think/State/Answer protocol. The Judge
-receives ``judge_prompt`` as a separate one-line parquet column.
-Neither artifact contains the legacy canonical ``process_response``.
+The actor can see either the legacy dynamic exact-order protocol or the compact
+inferred-order Think/State/Answer protocol. The Judge receives ``judge_prompt``
+as a separate one-line parquet column. Neither artifact contains the legacy
+canonical ``process_response``.
 """
 
 from __future__ import annotations
@@ -23,11 +24,28 @@ from grpo.prompt import (
     clean_numbered_story,
 )
 from rft.common import read_jsonl
-from rft.prompt import NATURAL_COT_PROMPT_VERSION
+from rft.prompt import (
+    COMPACT_NATURAL_COT_PROMPT_VERSION,
+    NATURAL_COT_PROMPT_VERSION,
+    compact_process_record,
+)
 
 DATA_SOURCE = "robust_tom_natural_cot_v4"
+COMPACT_DATA_SOURCE = "robust_tom_natural_cot_v4_compact"
 PROMPT_VERSION = NATURAL_COT_PROMPT_VERSION
+SUPPORTED_PROMPT_VERSIONS = {
+    NATURAL_COT_PROMPT_VERSION: DATA_SOURCE,
+    COMPACT_NATURAL_COT_PROMPT_VERSION: COMPACT_DATA_SOURCE,
+}
 EXPECTED_SPLIT_COUNTS = {"train": 3200, "val": 400, "test": 600}
+DEFAULT_SOURCE_OUTPUT_DIR = Path("data/counterfactual_process_reward_v4_natural")
+DEFAULT_COMPACT_SOURCE_OUTPUT_DIR = Path(
+    "data/counterfactual_process_reward_v4_natural_compact"
+)
+DEFAULT_PARQUET_OUTPUT_DIR = Path("data/grpo/counterfactual_process_reward_v4_natural")
+DEFAULT_COMPACT_PARQUET_OUTPUT_DIR = Path(
+    "data/grpo/counterfactual_process_reward_v4_natural_compact"
+)
 
 
 def _sha256_file(path: Path) -> str:
@@ -65,8 +83,10 @@ def _validate_target(source: Mapping[str, Any]) -> dict[str, Any]:
     return target
 
 
-def build_natural_source_row(source: Mapping[str, Any]) -> dict[str, Any]:
-    """Remove legacy response/schema fields and create explicit actor/Judge prompts."""
+def build_natural_source_row(
+    source: Mapping[str, Any], *, compact_prompt: bool = False
+) -> dict[str, Any]:
+    """Remove legacy fields and create separate actor and Judge prompts."""
     _validate_target(source)
     row = dict(source)
     row["story"] = clean_numbered_story(str(source.get("story", "")))
@@ -80,10 +100,16 @@ def build_natural_source_row(source: Mapping[str, Any]) -> dict[str, Any]:
         "prompt",
     ):
         row.pop(key, None)
+    if compact_prompt:
+        row = compact_process_record(row)
     if "\n" in row["story"] or "\n" in row["judge_prompt"]:
-        raise AssertionError("Natural-CoT stories and Judge prompts must be single-line")
+        raise AssertionError(
+            "Natural-CoT stories and Judge prompts must be single-line"
+        )
     if "\n" not in row["process_prompt"]:
-        raise AssertionError("Natural-CoT actor prompts must expose a multiline template")
+        raise AssertionError(
+            "Natural-CoT actor prompts must expose a multiline template"
+        )
     return row
 
 
@@ -95,13 +121,26 @@ def _write_jsonl(path: Path, rows: list[Mapping[str, Any]]) -> None:
     )
 
 
-def prepare_source_dataset(input_dir: Path, output_dir: Path) -> dict[str, Any]:
+def prepare_source_dataset(
+    input_dir: Path,
+    output_dir: Path,
+    *,
+    compact_prompt: bool = False,
+) -> dict[str, Any]:
     """Create the standalone natural-CoT JSONL dataset using only stdlib I/O."""
+    prompt_version = (
+        COMPACT_NATURAL_COT_PROMPT_VERSION
+        if compact_prompt
+        else NATURAL_COT_PROMPT_VERSION
+    )
     split_metrics: dict[str, Any] = {}
     for split, expected_count in EXPECTED_SPLIT_COUNTS.items():
         input_path = input_dir / f"{split}.jsonl"
         output_path = output_dir / f"{split}.jsonl"
-        rows = [build_natural_source_row(row) for row in read_jsonl(input_path)]
+        rows = [
+            build_natural_source_row(row, compact_prompt=compact_prompt)
+            for row in read_jsonl(input_path)
+        ]
         if len(rows) != expected_count:
             raise ValueError(
                 f"Unexpected {split} count: {len(rows)} != {expected_count}"
@@ -118,8 +157,14 @@ def prepare_source_dataset(input_dir: Path, output_dir: Path) -> dict[str, Any]:
             "output_sha256": _sha256_file(output_path),
         }
     manifest = {
-        "name": "RobustToM natural-CoT v4 source data",
-        "prompt_version": PROMPT_VERSION,
+        "name": (
+            "RobustToM natural-CoT v4 compact source data"
+            if compact_prompt
+            else "RobustToM natural-CoT v4 source data"
+        ),
+        "prompt_version": prompt_version,
+        "compact_prompt": compact_prompt,
+        "numeric_tom_order_exposed_to_actor": not compact_prompt,
         "contains_process_response": False,
         "event_numbers_removed": True,
         "multiline_actor_prompts": True,
@@ -139,6 +184,7 @@ def build_parquet_row(
     index: int,
     tokenizer: Any,
     max_prompt_length: int,
+    expected_prompt_version: str | None = None,
 ) -> dict[str, Any]:
     """Convert one natural source row while preserving Judge and scoring fields."""
     target = _validate_target(source)
@@ -150,10 +196,22 @@ def build_parquet_row(
         raise ValueError("Natural source row is missing judge_prompt")
     if source.get("process_response") is not None:
         raise ValueError("Natural source rows must not contain process_response")
-    if source.get("process_prompt_version") != PROMPT_VERSION:
+    prompt_version = source.get("process_prompt_version")
+    if (
+        not isinstance(prompt_version, str)
+        or prompt_version not in SUPPORTED_PROMPT_VERSIONS
+    ):
         raise ValueError(
             "Natural source row has an unexpected process_prompt_version: "
-            f"{source.get('process_prompt_version')!r}"
+            f"{prompt_version!r}"
+        )
+    if (
+        expected_prompt_version is not None
+        and prompt_version != expected_prompt_version
+    ):
+        raise ValueError(
+            "Natural source row prompt version does not match this build: "
+            f"{prompt_version!r} != {expected_prompt_version!r}"
         )
 
     prompt_length = len(chat_prompt_token_ids(tokenizer, actor_prompt))
@@ -175,9 +233,10 @@ def build_parquet_row(
         "last_mentioned_container": str(source.get("last_mentioned_container", "")),
     }
     return {
-        "data_source": DATA_SOURCE,
+        "data_source": SUPPORTED_PROMPT_VERSIONS[prompt_version],
         "prompt": [{"role": "user", "content": actor_prompt}],
         "judge_prompt": judge_prompt,
+        "process_prompt_version": prompt_version,
         "reward_model": {
             "style": "natural_cot_judge",
             "ground_truth": target,
@@ -193,6 +252,7 @@ def convert_parquet_split(
     output_path: Path,
     tokenizer: Any,
     max_prompt_length: int,
+    expected_prompt_version: str = PROMPT_VERSION,
 ) -> dict[str, Any]:
     try:
         import pandas as pd
@@ -203,7 +263,13 @@ def convert_parquet_split(
 
     source_rows = read_jsonl(input_path)
     rows = [
-        build_parquet_row(row, index, tokenizer, max_prompt_length)
+        build_parquet_row(
+            row,
+            index,
+            tokenizer,
+            max_prompt_length,
+            expected_prompt_version=expected_prompt_version,
+        )
         for index, row in enumerate(source_rows)
     ]
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -231,6 +297,7 @@ def build_parquet_dataset(
     output_dir: Path,
     tokenizer_name: str,
     max_prompt_length: int = 2048,
+    prompt_version: str = PROMPT_VERSION,
 ) -> dict[str, Any]:
     try:
         from transformers import AutoTokenizer
@@ -238,6 +305,8 @@ def build_parquet_dataset(
         raise RuntimeError("transformers is required to audit prompt lengths") from exc
 
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, use_fast=True)
+    if prompt_version not in SUPPORTED_PROMPT_VERSIONS:
+        raise ValueError(f"Unsupported prompt version: {prompt_version!r}")
     splits: dict[str, Any] = {}
     for split, expected_count in EXPECTED_SPLIT_COUNTS.items():
         splits[split] = convert_parquet_split(
@@ -245,6 +314,7 @@ def build_parquet_dataset(
             output_dir / f"{split}.parquet",
             tokenizer,
             max_prompt_length,
+            expected_prompt_version=prompt_version,
         )
         if splits[split]["count"] != expected_count:
             actual_count = splits[split]["count"]
@@ -252,8 +322,13 @@ def build_parquet_dataset(
                 f"Unexpected {split} count: {actual_count} != {expected_count}"
             )
     manifest = {
-        "name": "RobustToM natural-CoT v4 verl parquet",
-        "prompt_version": PROMPT_VERSION,
+        "name": (
+            "RobustToM natural-CoT v4 compact verl parquet"
+            if prompt_version == COMPACT_NATURAL_COT_PROMPT_VERSION
+            else "RobustToM natural-CoT v4 verl parquet"
+        ),
+        "prompt_version": prompt_version,
+        "compact_prompt": prompt_version == COMPACT_NATURAL_COT_PROMPT_VERSION,
         "tokenizer": tokenizer_name,
         "max_prompt_length": max_prompt_length,
         "contains_judge_prompt": True,
@@ -277,15 +352,26 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--source-output-dir",
         type=Path,
-        default=Path("data/counterfactual_process_reward_v4_natural"),
+        help=(
+            "Source JSONL output directory. Defaults to a separate compact "
+            "directory when --compact-prompt is set."
+        ),
     )
     parser.add_argument(
         "--parquet-output-dir",
         type=Path,
-        default=Path("data/grpo/counterfactual_process_reward_v4_natural"),
+        help=(
+            "Parquet output directory. Defaults to a separate compact "
+            "directory when --compact-prompt is set."
+        ),
     )
     parser.add_argument("--tokenizer", default="runs/final")
     parser.add_argument("--max-prompt-length", type=int, default=2048)
+    parser.add_argument(
+        "--compact-prompt",
+        action="store_true",
+        help="Make the actor infer ToM order instead of exposing its numeric value",
+    )
     parser.add_argument(
         "--source-only",
         action="store_true",
@@ -296,14 +382,34 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    source_manifest = prepare_source_dataset(args.input_dir, args.source_output_dir)
+    source_output_dir = args.source_output_dir or (
+        DEFAULT_COMPACT_SOURCE_OUTPUT_DIR
+        if args.compact_prompt
+        else DEFAULT_SOURCE_OUTPUT_DIR
+    )
+    parquet_output_dir = args.parquet_output_dir or (
+        DEFAULT_COMPACT_PARQUET_OUTPUT_DIR
+        if args.compact_prompt
+        else DEFAULT_PARQUET_OUTPUT_DIR
+    )
+    prompt_version = (
+        COMPACT_NATURAL_COT_PROMPT_VERSION
+        if args.compact_prompt
+        else NATURAL_COT_PROMPT_VERSION
+    )
+    source_manifest = prepare_source_dataset(
+        args.input_dir,
+        source_output_dir,
+        compact_prompt=args.compact_prompt,
+    )
     result: dict[str, Any] = {"source": source_manifest}
     if not args.source_only:
         result["parquet"] = build_parquet_dataset(
-            args.source_output_dir,
-            args.parquet_output_dir,
+            source_output_dir,
+            parquet_output_dir,
             args.tokenizer,
             args.max_prompt_length,
+            prompt_version=prompt_version,
         )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

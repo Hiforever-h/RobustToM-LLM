@@ -10,7 +10,11 @@ from grpo.build_natural_dataset import (
 )
 from grpo.prompt import build_natural_cot_prompt, build_natural_problem_prompt
 from rft.common import read_jsonl
-from rft.prompt import NATURAL_COT_PROMPT_VERSION
+from rft.prompt import (
+    COMPACT_NATURAL_COT_PROMPT_VERSION,
+    NATURAL_COT_PROMPT_VERSION,
+    build_compact_process_prompt,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -28,9 +32,7 @@ class FakeTokenizer:
 class NaturalCoTDatasetTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        rows = read_jsonl(
-            ROOT / "data/counterfactual_process_reward_v3/train.jsonl"
-        )
+        rows = read_jsonl(ROOT / "data/counterfactual_process_reward_v3/train.jsonl")
         cls.raw = rows[0]
         cls.raw_by_order = {
             order: next(row for row in rows if row["question_order"] == order)
@@ -87,6 +89,20 @@ class NaturalCoTDatasetTest(unittest.TestCase):
         self.assertNotIn("\n", row["judge_prompt"])
         self.assertEqual(row["process_target"], self.raw["process_target"])
 
+    def test_compact_source_requires_model_to_infer_order(self):
+        row = build_natural_source_row(self.raw, compact_prompt=True)
+        prompt = row["process_prompt"]
+        instruction = prompt.rsplit("\n\n", 1)[-1]
+        self.assertEqual(
+            row["process_prompt_version"], COMPACT_NATURAL_COT_PROMPT_VERSION
+        )
+        self.assertEqual(prompt, build_compact_process_prompt(row))
+        self.assertIn("Infer N from the question itself", instruction)
+        self.assertNotIn("Reasoning rules:", prompt)
+        self.assertNotIn("Required output format:", prompt)
+        self.assertNotRegex(instruction, re.compile(r"\bN\s*=\s*\d+\b"))
+        self.assertNotIn("process_response", row)
+
     def test_parquet_row_preserves_explicit_judge_prompt_and_target(self):
         source = build_natural_source_row(self.raw)
         row = build_parquet_row(
@@ -100,6 +116,23 @@ class NaturalCoTDatasetTest(unittest.TestCase):
         self.assertEqual(row["reward_model"]["ground_truth"], source["process_target"])
         self.assertEqual(row["reward_model"]["style"], "natural_cot_judge")
         self.assertEqual(row["extra_info"]["index"], 7)
+
+    def test_parquet_row_accepts_compact_prompt_version(self):
+        source = build_natural_source_row(self.raw, compact_prompt=True)
+        row = build_parquet_row(
+            source,
+            index=8,
+            tokenizer=FakeTokenizer(),
+            max_prompt_length=100000,
+            expected_prompt_version=COMPACT_NATURAL_COT_PROMPT_VERSION,
+        )
+        self.assertEqual(row["data_source"], "robust_tom_natural_cot_v4_compact")
+        self.assertEqual(
+            row["process_prompt_version"], COMPACT_NATURAL_COT_PROMPT_VERSION
+        )
+        self.assertEqual(row["prompt"][0]["content"], source["process_prompt"])
+        self.assertEqual(row["judge_prompt"], source["judge_prompt"])
+        self.assertEqual(row["reward_model"]["ground_truth"], source["process_target"])
 
     def test_generated_source_manifest_and_rows_are_auditable(self):
         data_dir = ROOT / "data/counterfactual_process_reward_v4_natural"
@@ -129,6 +162,26 @@ class NaturalCoTDatasetTest(unittest.TestCase):
                 for index in range(1, order + 1):
                     self.assertEqual(prompt.count(f"Think {index}:"), 1)
                 self.assertNotIn(f"Think {order + 1}:", prompt)
+
+    def test_generated_compact_source_has_all_three_splits(self):
+        data_dir = ROOT / "data/counterfactual_process_reward_v4_natural_compact"
+        manifest = json.loads((data_dir / "manifest.json").read_text(encoding="utf-8"))
+        self.assertTrue(manifest["compact_prompt"])
+        self.assertFalse(manifest["numeric_tom_order_exposed_to_actor"])
+        self.assertEqual(manifest["prompt_version"], COMPACT_NATURAL_COT_PROMPT_VERSION)
+        for split, expected_count in (("train", 3200), ("val", 400), ("test", 600)):
+            rows = read_jsonl(data_dir / f"{split}.jsonl")
+            self.assertEqual(len(rows), expected_count)
+            for row in rows:
+                self.assertNotIn("process_response", row)
+                self.assertEqual(
+                    row["process_prompt_version"],
+                    COMPACT_NATURAL_COT_PROMPT_VERSION,
+                )
+                self.assertEqual(
+                    row["process_prompt"], build_compact_process_prompt(row)
+                )
+                self.assertNotIn("Reasoning rules:", row["process_prompt"])
 
 
 if __name__ == "__main__":

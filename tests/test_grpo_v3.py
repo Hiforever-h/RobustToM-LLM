@@ -12,6 +12,7 @@ from grpo.metrics import summarize_group_rewards, summarize_reward_records
 from grpo.prompt import ORDER_TRACE_INSTRUCTION, build_grpo_prompt
 from rft.common import read_jsonl
 from rft.reward import score_process_output
+from scripts.add_symbolic_v3_few_shots import add_few_shots
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -35,8 +36,6 @@ class GrpoPromptAndDataTest(unittest.TestCase):
         cls.raw = read_jsonl(
             ROOT / "data/counterfactual_process_reward_v3/train.jsonl"
         )[0]
-        cls.derived = read_jsonl(ROOT / "data/rft/derived_v3_fewshot/train.jsonl")
-        cls.derived_by_id = {row["global_sample_id"]: row for row in cls.derived}
 
     def test_prompt_matches_existing_few_shot_augmentation_plus_instruction(self):
         import scripts
@@ -47,7 +46,7 @@ class GrpoPromptAndDataTest(unittest.TestCase):
         )
         actual = build_grpo_prompt(self.raw["process_prompt"])
         without_clarification = actual.replace(f" {ORDER_TRACE_INSTRUCTION}", "", 1)
-        expected = self.derived_by_id[self.raw["global_sample_id"]]["process_prompt"]
+        expected = add_few_shots(self.raw["process_prompt"])
         self.assertEqual(without_clarification, expected)
         self.assertEqual(actual.count(ORDER_TRACE_INSTRUCTION), 1)
         self.assertEqual(actual.count("Nested-belief demonstrations (3-shot):"), 1)
@@ -122,11 +121,18 @@ class GrpoConfigTest(unittest.TestCase):
             config = yaml.safe_load(stream)
 
         self.assertEqual(config["reward"]["mode"], "natural_cot_judge")
+        self.assertEqual(config["reward"]["process_weight"], 0.75)
+        self.assertEqual(config["reward"]["structure_weight"], 0.05)
+        self.assertEqual(config["reward"]["answer_weight"], 0.2)
         self.assertEqual(config["actor_rollout_ref"]["rollout"]["n"], 16)
         self.assertEqual(config["data"]["max_response_length"], 384)
         self.assertIn(
-            "counterfactual_process_reward_v4_natural",
+            "counterfactual_process_reward_v4_natural_compact",
             config["data"]["train_files"],
+        )
+        self.assertIn(
+            "counterfactual_process_reward_v4_natural_compact",
+            config["data"]["val_files"],
         )
         self.assertFalse(config["reward"]["validation"]["judge_enabled"])
         self.assertEqual(config["reward"]["judge"]["max_workers"], 8)

@@ -3,8 +3,8 @@ defaults:
   - _self_
 
 data:
-  train_files: data/grpo/counterfactual_process_reward_v4_natural/train.parquet
-  val_files: data/grpo/counterfactual_process_reward_v4_natural/val.parquet
+  train_files: data/grpo/counterfactual_process_reward_v4_natural_compact/train.parquet
+  val_files: data/grpo/counterfactual_process_reward_v4_natural_compact/val.parquet
   prompt_key: prompt
   max_prompt_length: 2048
   max_response_length: 384
@@ -98,8 +98,9 @@ algorithm:
 
 reward:
   mode: natural_cot_judge
-  process_weight: 0.8
+  process_weight: 0.75
   answer_weight: 0.2
+  structure_weight: 0.05
   state_weight_within_step: 0.4
   reasoning_weight_within_step: 0.6
   judge:
@@ -120,8 +121,8 @@ reward:
 trainer:
   total_epochs: 2
   total_training_steps: 800
-  project_name: robust_tom_natural_grpo_v4
-  experiment_name: qwen25_3b_natural_cot_judge_n16_seed2026
+  project_name: robust_tom_natural_grpo_v4_compact
+  experiment_name: qwen25_3b_compact_natural_cot_judge_n16_seed2026
   logger: [console, wandb]
   progress_bar: true
   nnodes: 1

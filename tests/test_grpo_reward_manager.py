@@ -191,6 +191,28 @@ class NaturalCoTRewardManagerTest(unittest.TestCase):
         metrics = manager.last_metrics()
         self.assertEqual(metrics["reward/judge/group_count"], 2.0)
         self.assertEqual(metrics["reward/judge/total_tokens"], 24.0)
+        self.assertEqual(metrics["reward/format_progress_mean"], 1.0)
+        self.assertEqual(metrics["reward/valid_structure_prefix_fraction_mean"], 1.0)
+        self.assertEqual(metrics["reward/structure_bonus_mean"], 0.0)
+
+    def test_build_manager_propagates_grpo_structure_weight(self):
+        from grpo.reward_manager import build_reward_manager
+
+        manager = build_reward_manager(
+            tokenizer=object(),
+            reward_config={
+                "mode": "natural_cot_judge",
+                "process_weight": 0.75,
+                "structure_weight": 0.05,
+                "answer_weight": 0.2,
+                "judge": {"cache_enabled": False},
+            },
+            rollout_n=16,
+        )
+        weights = manager.scorer.reward_config
+        self.assertEqual(weights.process_weight, 0.75)
+        self.assertEqual(weights.structure_weight, 0.05)
+        self.assertEqual(weights.answer_weight, 0.2)
 
     def test_missing_rollout_index_fails_before_judge(self):
         from grpo.natural_cot_reward_manager import NaturalCoTRewardManager

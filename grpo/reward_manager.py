@@ -158,6 +158,7 @@ def build_reward_manager(
     weights = RewardConfig(
         process_weight=float(_config_get(reward_config, "process_weight", 0.8)),
         answer_weight=float(_config_get(reward_config, "answer_weight", 0.2)),
+        structure_weight=float(_config_get(reward_config, "structure_weight", 0.0)),
         state_weight_within_step=float(
             _config_get(reward_config, "state_weight_within_step", 0.4)
         ),
