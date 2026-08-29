@@ -56,7 +56,7 @@ actor_rollout_ref:
   ref:
     model_path: runs/final
     fsdp_config:
-      param_offload: true
+      param_offload: false
       wrap_policy:
         min_num_params: 0
       fsdp_size: -1

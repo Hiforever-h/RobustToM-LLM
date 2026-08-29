@@ -126,6 +126,12 @@ class GrpoConfigTest(unittest.TestCase):
         self.assertEqual(config["reward"]["answer_weight"], 0.2)
         self.assertEqual(config["actor_rollout_ref"]["rollout"]["n"], 16)
         self.assertEqual(config["data"]["max_response_length"], 384)
+        self.assertTrue(
+            config["actor_rollout_ref"]["actor"]["fsdp_config"]["param_offload"]
+        )
+        self.assertFalse(
+            config["actor_rollout_ref"]["ref"]["fsdp_config"]["param_offload"]
+        )
         self.assertIn(
             "counterfactual_process_reward_v4_natural_compact",
             config["data"]["train_files"],
