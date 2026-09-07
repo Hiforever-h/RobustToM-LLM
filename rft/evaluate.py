@@ -14,6 +14,7 @@ from rft.common import read_jsonl
 from rft.prompt import (
     COMPACT_NATURAL_COT_PROMPT_VERSION,
     NATURAL_COT_PROMPT_VERSION,
+    PRIVILEGED_TEACHER_PROMPT_VERSION,
     compact_process_record,
 )
 from rft.reward import parse_prediction, score_process_output
@@ -32,6 +33,7 @@ NATURAL_PROMPT_VERSIONS = frozenset(
         "natural-cot-think-state-v1",
         NATURAL_COT_PROMPT_VERSION,
         COMPACT_NATURAL_COT_PROMPT_VERSION,
+        PRIVILEGED_TEACHER_PROMPT_VERSION,
     }
 )
 
@@ -146,6 +148,7 @@ def _natural_score(
         "format": bool(checks["structure_ok"]),
         "reasoning_present": all(bool(value) for value in rule["reasoning_present"]),
         "state_accuracy": float(rule["state_accuracy"]),
+        "state_correct": [bool(value) for value in rule["state_correct"]],
         "core_state_correct": bool(rule["all_states_correct"]),
         "answer": answer,
         "answer_correct": bool(rule["answer_correct"]),
@@ -160,9 +163,13 @@ def _legacy_score(response: str, target: dict[str, Any]) -> dict[str, Any]:
     mode = target.get("reasoning_mode")
     if mode == "world_state":
         core_state = checks.get("world_state", False)
+        state_correct = [bool(core_state)]
         state_value = normalize(prediction.get("world_state", "")) if prediction else None
     elif mode == "nested_belief":
         core_state = checks.get("belief_trace", False)
+        state_correct = [
+            bool(value) for value in checks.get("belief_trace_steps", [])
+        ]
         trace = prediction.get("belief_trace") if prediction else None
         state_value = (
             normalize(trace[-1]["location"])
@@ -176,6 +183,7 @@ def _legacy_score(response: str, target: dict[str, Any]) -> dict[str, Any]:
         core_state = checks.get("final_move_observed", False) and checks.get(
             "nested_belief", False
         )
+        state_correct = [bool(core_state)]
         state_value = (
             normalize(prediction.get("nested_belief", "")) if prediction else None
         )
@@ -191,6 +199,7 @@ def _legacy_score(response: str, target: dict[str, Any]) -> dict[str, Any]:
         "format": bool(checks.get("format", False)),
         "reasoning_present": True,
         "state_accuracy": float(bool(core_state)),
+        "state_correct": state_correct,
         "core_state_correct": bool(core_state),
         "answer": answer,
         "answer_correct": bool(checks.get("answer", False)),
@@ -227,6 +236,18 @@ def _metric_rows(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
             if scored
             else 0.0
         )
+
+    state_steps: defaultdict[int, list[bool]] = defaultdict(list)
+    intermediate_steps: list[bool] = []
+    intermediate_rows: list[list[bool]] = []
+    for item in scored:
+        state_correct = [bool(value) for value in item.get("state_correct", [])]
+        for index, correct in enumerate(state_correct, start=1):
+            state_steps[index].append(correct)
+        if len(state_correct) > 1:
+            intermediate = state_correct[:-1]
+            intermediate_steps.extend(intermediate)
+            intermediate_rows.append(intermediate)
 
     pair_groups: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
     for item in scored:
@@ -301,6 +322,24 @@ def _metric_rows(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
             if scored
             else 0.0
         ),
+        "state_step_accuracy": {
+            str(index): sum(values) / len(values)
+            for index, values in sorted(state_steps.items())
+        },
+        "state_step_counts": {
+            str(index): len(values) for index, values in sorted(state_steps.items())
+        },
+        "intermediate_state_accuracy": (
+            sum(intermediate_steps) / len(intermediate_steps)
+            if intermediate_steps
+            else None
+        ),
+        "all_intermediate_states_correct_rate": (
+            sum(all(values) for values in intermediate_rows) / len(intermediate_rows)
+            if intermediate_rows
+            else None
+        ),
+        "intermediate_state_sample_count": len(intermediate_rows),
         "pair_accuracy": pair_accuracy,
         "intervention_sensitivity": intervention_sensitivity,
         "shortcut_copy_rate": shortcut_copy_rate,

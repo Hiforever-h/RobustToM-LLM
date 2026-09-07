@@ -8,6 +8,9 @@ from typing import Any
 
 NATURAL_COT_PROMPT_VERSION = "natural-cot-think-state-v2-exact-order"
 COMPACT_NATURAL_COT_PROMPT_VERSION = "natural-cot-think-state-v3-compact"
+PRIVILEGED_TEACHER_PROMPT_VERSION = (
+    "natural-cot-think-state-v3-compact-privileged-answer-support-events-v1"
+)
 
 
 def build_compact_process_prompt(record: Mapping[str, Any]) -> str:

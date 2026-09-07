@@ -1,0 +1,28 @@
+{
+  "name": "RobustToM order-4 OOD privileged-teacher evaluation data",
+  "prompt_version": "natural-cot-think-state-v3-compact-privileged-answer-support-events-v1",
+  "privileged_reference_version": "answer-support-events-v1",
+  "source_file": "data/counterfactual_process_reward_v4_natural_compact/test.jsonl",
+  "output_file": "data/counterfactual_process_reward_v4_natural_compact_teacher_order4_ood/test.jsonl",
+  "count": 600,
+  "pair_count": 300,
+  "order_counts": {
+    "4": 600
+  },
+  "intervention_counts": {
+    "observed": 300,
+    "hidden": 300
+  },
+  "support_event_count_distribution": {
+    "4": 600
+  },
+  "critical_event_is_support_count": {
+    "observed": 300,
+    "hidden": 0
+  },
+  "gold_answer_exposed_to_teacher": true,
+  "student_prompt_preserved": true,
+  "generator_labels_exposed_in_prompt": false,
+  "input_sha256": "7df5b07750641a7dc072804146d94929629d99e64e6b9214f36de7cea7225b77",
+  "output_sha256": "8f30ca9bf849e7788178e7b71ed2d424fbce9611e50cc5b34fb3bb6481031805"
+}
