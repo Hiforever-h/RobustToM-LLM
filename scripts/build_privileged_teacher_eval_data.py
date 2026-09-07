@@ -237,11 +237,16 @@ def build_dataset(input_path: Path, output_dir: Path) -> dict[str, Any]:
     rows = [build_privileged_teacher_row(row) for row in source_rows]
     if not rows:
         raise ValueError("Input dataset is empty")
-    if any(row.get("question_order") != 4 for row in rows):
-        raise ValueError("This builder expects a pure order-4 OOD dataset")
+    for row in rows:
+        question_order = row.get("question_order")
+        target_order = row["process_target"]["tom_order"]
+        if type(question_order) is not int or question_order < 1:
+            raise ValueError(f"Invalid question_order: {_sample_name(row)}")
+        if question_order != target_order:
+            raise ValueError(f"Question/target order mismatch: {_sample_name(row)}")
 
     output_dir.mkdir(parents=True, exist_ok=False)
-    output_path = output_dir / "test.jsonl"
+    output_path = output_dir / input_path.name
     write_jsonl(output_path, rows)
     support_counts = Counter(
         len(row["privileged_reference"]["support_events"]) for row in rows
@@ -252,15 +257,17 @@ def build_dataset(input_path: Path, output_dir: Path) -> dict[str, Any]:
         critical_in_support[
             str(row.get("intervention_type"))
         ] += row.get("critical_event_id") in support_ids
+    order_counts = Counter(str(row["question_order"]) for row in rows)
     manifest = {
-        "name": "RobustToM order-4 OOD privileged-teacher evaluation data",
+        "name": "RobustToM privileged-teacher evaluation data",
+        "split": input_path.stem,
         "prompt_version": PRIVILEGED_PROMPT_VERSION,
         "privileged_reference_version": PRIVILEGED_REFERENCE_VERSION,
         "source_file": str(input_path),
         "output_file": str(output_path),
         "count": len(rows),
         "pair_count": len({row["global_pair_id"] for row in rows}),
-        "order_counts": dict(Counter(str(row["question_order"]) for row in rows)),
+        "order_counts": dict(order_counts),
         "intervention_counts": dict(
             Counter(str(row["intervention_type"]) for row in rows)
         ),

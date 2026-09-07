@@ -56,6 +56,23 @@ class PrivilegedTeacherEvalDataTest(unittest.TestCase):
             )
         self.assertEqual(counts, {"observed": 300, "hidden": 0})
 
+    def test_validation_orders_have_matching_support_event_counts(self):
+        rows = read_jsonl(
+            ROOT / "data/counterfactual_process_reward_v4_natural_compact/val.jsonl"
+        )
+        self.assertEqual(len(rows), 400)
+        for source in rows:
+            with self.subTest(sample=source["global_sample_id"]):
+                row = build_privileged_teacher_row(source)
+                order = source["question_order"]
+                self.assertIn(order, {1, 2, 3})
+                self.assertEqual(
+                    len(row["privileged_reference"]["support_events"]), order
+                )
+                self.assertEqual(
+                    row["privileged_context"].count("\n- "), order
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

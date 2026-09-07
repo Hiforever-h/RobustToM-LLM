@@ -1,0 +1,33 @@
+{
+  "name": "RobustToM privileged-teacher evaluation data",
+  "split": "val",
+  "prompt_version": "natural-cot-think-state-v3-compact-privileged-answer-support-events-v1",
+  "privileged_reference_version": "answer-support-events-v1",
+  "source_file": "data/counterfactual_process_reward_v4_natural_compact/val.jsonl",
+  "output_file": "data/counterfactual_process_reward_v4_natural_compact_teacher_val/val.jsonl",
+  "count": 400,
+  "pair_count": 200,
+  "order_counts": {
+    "3": 100,
+    "2": 200,
+    "1": 100
+  },
+  "intervention_counts": {
+    "hidden": 200,
+    "observed": 200
+  },
+  "support_event_count_distribution": {
+    "1": 100,
+    "2": 200,
+    "3": 100
+  },
+  "critical_event_is_support_count": {
+    "hidden": 0,
+    "observed": 200
+  },
+  "gold_answer_exposed_to_teacher": true,
+  "student_prompt_preserved": true,
+  "generator_labels_exposed_in_prompt": false,
+  "input_sha256": "824d28903ec782e12cfb708c2d3bca14ba0440b6aa3b1919ff56ebd4f28320ea",
+  "output_sha256": "5b6067eeb0ee26c7fc6aa90e7c29cacd33bf0f990062672e33768a758392663a"
+}
