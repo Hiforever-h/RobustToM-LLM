@@ -1,0 +1,97 @@
+{
+  "name": "ToM-RL-paper-eval-open-ended",
+  "source_file": "eval_tom/tom_eval_datasets.csv",
+  "source_file_sha256": "3d13593825224d43a283c9f4d945a87624979a19a7ae812f0bfc8429c8af5b67",
+  "source_count": 9326,
+  "filter": {
+    "question_order": ">= 1"
+  },
+  "excluded_order0_count": 2474,
+  "test_count": 6852,
+  "prompt_version": "natural-cot-think-state-v3-compact-open-ended",
+  "choices_in_prompt": false,
+  "process_targets_available": false,
+  "evaluation_mode": "answer-only",
+  "source_order_counts_before_filter": {
+    "4th-order-ToM": {
+      "4": 600
+    },
+    "explore_tom_infilled": {
+      "0": 178,
+      "1": 118,
+      "2": 770
+    },
+    "explore_tom_structured": {
+      "0": 178,
+      "1": 118,
+      "2": 770
+    },
+    "hi_tom": {
+      "0": 120,
+      "1": 120,
+      "2": 120,
+      "3": 120,
+      "4": 120
+    },
+    "tomi": {
+      "0": 1998,
+      "1": 1998,
+      "2": 1998
+    }
+  },
+  "source_order_counts_after_filter": {
+    "4th-order-ToM": {
+      "4": 600
+    },
+    "explore_tom_infilled": {
+      "1": 118,
+      "2": 770
+    },
+    "explore_tom_structured": {
+      "1": 118,
+      "2": 770
+    },
+    "hi_tom": {
+      "1": 120,
+      "2": 120,
+      "3": 120,
+      "4": 120
+    },
+    "tomi": {
+      "1": 1998,
+      "2": 1998
+    }
+  },
+  "outputs": {
+    "test": {
+      "path": "data/tomrl_paper_eval_open_ended/test.jsonl",
+      "count": 6852,
+      "sha256": "77972717d425b741d1958e8bb05294e96a95e3235556dac8d38db11a471e11a5"
+    },
+    "hi_tom": {
+      "path": "data/tomrl_paper_eval_open_ended/hi_tom.jsonl",
+      "count": 480,
+      "sha256": "d812cc69cc18c34f603ec595185a5c66e02d66cf32f171e36fd504a127e58ef6"
+    },
+    "4th-order-ToM": {
+      "path": "data/tomrl_paper_eval_open_ended/order4.jsonl",
+      "count": 600,
+      "sha256": "0486f133cc8e47d1e30edd36b2214bc3428f22c0abeacb98cc500859cae0680a"
+    },
+    "tomi": {
+      "path": "data/tomrl_paper_eval_open_ended/tomi.jsonl",
+      "count": 3996,
+      "sha256": "5e434df30113235c2b31f32d68ffe52acf3b9c63ac2d9cac5a49907a17f2d149"
+    },
+    "explore_tom_structured": {
+      "path": "data/tomrl_paper_eval_open_ended/explore_tom_structured.jsonl",
+      "count": 888,
+      "sha256": "612355b47d05e1ff927e0546d96b16829e6c6e7ea4aa8b705f2d112a9f5720c9"
+    },
+    "explore_tom_infilled": {
+      "path": "data/tomrl_paper_eval_open_ended/explore_tom_infilled.jsonl",
+      "count": 888,
+      "sha256": "9f863d6f149665e3d914f7b40a8b197e67f7946327eeb235f6a376b6a2ba2b7e"
+    }
+  }
+}
