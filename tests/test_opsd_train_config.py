@@ -1,10 +1,12 @@
 import ast
+import os
 import tempfile
 import unittest
 from argparse import Namespace
 from pathlib import Path
+from unittest.mock import patch
 
-from opsd.train import _validate_cli
+from opsd.train import _sanitize_allocator_environment, _validate_cli
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -64,6 +66,21 @@ class OPSDTrainConfigTest(unittest.TestCase):
         self.assertEqual(
             ast.literal_eval(keyword.value), {"skip_prepare_dataset": True}
         )
+
+    def test_vllm_incompatible_allocator_setting_is_removed(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "PYTORCH_CUDA_ALLOC_CONF": (
+                    "max_split_size_mb:512,expandable_segments:True"
+                )
+            },
+            clear=True,
+        ):
+            _sanitize_allocator_environment()
+            self.assertEqual(
+                os.environ.get("PYTORCH_CUDA_ALLOC_CONF"), "max_split_size_mb:512"
+            )
 
 
 if __name__ == "__main__":

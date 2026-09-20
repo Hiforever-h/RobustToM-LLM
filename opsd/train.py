@@ -27,6 +27,32 @@ LORA_TARGETS = [
 ]
 
 
+def _sanitize_allocator_environment() -> None:
+    """Remove allocator settings that are incompatible with vLLM sleep mode."""
+    for variable in ("PYTORCH_CUDA_ALLOC_CONF", "PYTORCH_ALLOC_CONF"):
+        value = os.environ.get(variable)
+        if not value:
+            continue
+        settings = [item.strip() for item in value.split(",") if item.strip()]
+        compatible = [
+            item
+            for item in settings
+            if item.lower() != "expandable_segments:true"
+        ]
+        if len(compatible) == len(settings):
+            continue
+        if compatible:
+            os.environ[variable] = ",".join(compatible)
+        else:
+            os.environ.pop(variable, None)
+        print(
+            f"Removed expandable_segments:True from {variable}: it is "
+            "incompatible with the vLLM sleep-mode memory pool.",
+            file=sys.stderr,
+            flush=True,
+        )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", required=True, help="Full Hugging Face GRPO checkpoint")
@@ -163,6 +189,7 @@ def _audit_dataset(
 def main() -> None:
     args = parse_args()
     _validate_cli(args)
+    _sanitize_allocator_environment()
 
     try:
         import torch
@@ -321,7 +348,7 @@ def main() -> None:
         data_seed=args.seed,
         model_init_kwargs={
             "attn_implementation": "flash_attention_2",
-            "torch_dtype": torch.bfloat16,
+            "dtype": torch.bfloat16,
             "use_cache": False,
             "trust_remote_code": False,
         },

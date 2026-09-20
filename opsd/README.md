@@ -68,6 +68,13 @@ every optimizer step plus sampled completions to W&B project
 override W&B behavior. There is no validation during training. Checkpoints
 are saved at steps 50 and 100, followed by `final_adapter`.
 
+The launcher removes `expandable_segments:True` from PyTorch's allocator
+configuration because it is incompatible with the vLLM sleep-mode memory
+pool. It also creates a writable Triton cache under `/tmp`. A Linux kernel
+older than 5.5 may still produce an Accelerate warning and can hang under
+heavy distributed/CUDA workloads; changing the kernel requires a newer host
+or container host rather than a Python package change.
+
 ## Fixed training recipe
 
 | Setting | Value |
