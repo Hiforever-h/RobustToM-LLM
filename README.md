@@ -261,6 +261,17 @@ bash grpo/run_grpo_natural.sh train
 
 配置文件位于`verl/trainer/config/robust_tom_natural_grpo.yaml`。训练日志默认同时写入console和Weights & Biases。将`WANDB_MODE=offline`导出到环境变量可使用离线模式。
 
+## OPSD复现
+
+OPSD使用独立的TRL GOLD环境，避免与项目内`verl`固定的旧版vLLM依赖冲突。准备好完整的GRPO actor checkpoint后执行：
+
+```bash
+export OPSD_MODEL_PATH=/path/to/grpo/actor/global_step_800
+bash opsd/run_opsd.sh train
+```
+
+默认训练恰好100个optimizer step，覆盖3200条训练样本一轮；每题只生成一条student rollout，固定teacher读取答案和逐层support events。终端显示tqdm进度条，并逐step记录到Weights & Biases。完整环境、配置、数据构造和LoRA合并方式见[`opsd/README.md`](opsd/README.md)。
+
 ## 评测复现
 
 下面以任意一个Base、RFT或GRPO Hugging Face checkpoint为例。由于训练使用compact prompt，
@@ -307,6 +318,7 @@ python -m rft.evaluate \
 RobustToM-LLM/
 ├── data/       #反事实数据、compact JSONL、RFT split与GRPO Parquet
 ├── grpo/       #GRPO数据适配、RewardManager、指标与运行脚本
+├── opsd/       #privileged-context OPSD训练、数据与LoRA合并
 ├── rft/        #采样、筛选、response-only训练与deterministic评测
 ├── scripts/    #反事实数据生成、compact数据和LLM Judge reward
 ├── verl/       #项目内适配的verl训练代码

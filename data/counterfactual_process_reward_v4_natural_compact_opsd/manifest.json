@@ -1,0 +1,28 @@
+{
+  "name": "RobustToM privileged-context OPSD train data",
+  "count": 3200,
+  "pair_count": 1600,
+  "order_counts": {
+    "1": 800,
+    "2": 1504,
+    "3": 896
+  },
+  "intervention_counts": {
+    "hidden": 1600,
+    "observed": 1600
+  },
+  "support_event_count_distribution": {
+    "1": 800,
+    "2": 1504,
+    "3": 896
+  },
+  "source_file": "data/counterfactual_process_reward_v4_natural_compact/train.jsonl",
+  "output_file": "data/counterfactual_process_reward_v4_natural_compact_opsd/train.jsonl",
+  "student_column": "problem",
+  "teacher_column": "solution",
+  "teacher_prompt_version": "natural-cot-think-state-v3-compact-privileged-answer-support-events-v1",
+  "privileged_reference_version": "answer-support-events-v1",
+  "gold_answer_exposed_to_teacher_only": true,
+  "input_sha256": "b150f4b621075d156b34e3908ebaaa7b8a017fb969bb40d5359e8e2d7ff1c024",
+  "output_sha256": "9ea0f5479a5d19e12b7a0f343e3342d2a40b76d6c8af1524ddd7e0e106afadaa"
+}
