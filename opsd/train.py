@@ -79,7 +79,15 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help="Enable vLLM CUDA memory-pool sleep/wake (disabled for kernel compatibility)",
     )
-    parser.add_argument("--jsd-token-clip", type=float, default=1e-6)
+    parser.add_argument(
+        "--jsd-token-clip",
+        type=float,
+        default=None,
+        help=(
+            "Optional upper bound on the vocabulary-summed KL for each "
+            "completion token. Disabled by default."
+        ),
+    )
     parser.add_argument("--resume-from-checkpoint")
     return parser.parse_args()
 
@@ -95,7 +103,7 @@ def _validate_cli(args: argparse.Namespace) -> None:
         raise ValueError("batch size and gradient accumulation must be positive")
     if not 0.0 < args.vllm_gpu_memory_utilization < 1.0:
         raise ValueError("vLLM GPU utilization must be between zero and one")
-    if args.jsd_token_clip <= 0:
+    if args.jsd_token_clip is not None and args.jsd_token_clip <= 0:
         raise ValueError("--jsd-token-clip must be positive")
     if not args.data.is_file():
         raise FileNotFoundError(f"Missing OPSD dataset: {args.data}")
@@ -232,7 +240,7 @@ def main() -> None:
     tokenizer = AutoTokenizer.from_pretrained(
         args.model,
         trust_remote_code=False,
-        padding_side="right",
+        padding_side="left",
     )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token

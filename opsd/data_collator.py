@@ -21,7 +21,11 @@ class SelfDistillationDataCollator:
             raise ValueError("max_prompt_length must be positive")
         self.tokenizer = tokenizer
         self.max_prompt_length = max_prompt_length
-        self.tokenizer.padding_side = "right"
+        # Completions are appended to the rectangular prompt batch in the
+        # trainer.  Left padding keeps every real prompt token immediately
+        # adjacent to its completion; right padding would insert PAD/EOS
+        # tokens between shorter prompts and their completions.
+        self.tokenizer.padding_side = "left"
 
     def _render(self, prompt: str) -> str:
         if not isinstance(prompt, str) or not prompt.strip():

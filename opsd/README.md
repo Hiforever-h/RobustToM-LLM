@@ -92,7 +92,7 @@ setting. The launcher also creates a writable Triton cache under `/tmp`.
 | student update | LoRA rank 64, alpha 128 |
 | teacher | fixed initial GRPO policy |
 | loss | full-vocabulary forward KL (`beta=0`) |
-| point-wise token clip | 1e-6 |
+| per-token KL clip | disabled by default |
 | sampling | temperature 0.8, top-p 0.95 |
 | vLLM | colocate, resident (sleep off), utilization 0.30 |
 | seed | 2026 |
@@ -100,6 +100,12 @@ setting. The launcher also creates a writable Triton cache under `/tmp`.
 At startup the trainer tokenizes all student and teacher prompts and refuses
 to truncate any prompt. It also writes the resolved configuration and prompt
 length audit to `run_manifest.json` before loading the training model.
+
+Prompt batches use left padding so each real prompt remains directly adjacent
+to its sampled completion. Position IDs are derived from the attention mask,
+making them invariant to the amount of left padding. If
+`--jsd-token-clip VALUE` is explicitly supplied, the forward KL is first
+summed across the vocabulary and only then clipped per completion token.
 
 ## Evaluate without merging
 

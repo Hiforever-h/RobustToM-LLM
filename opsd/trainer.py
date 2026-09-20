@@ -415,7 +415,9 @@ class OPSDTrainer(SFTTrainer):
                 teacher distributions are renormalized over these k tokens before computing JSD. This reduces memory
                 and focuses distillation on the teacher's most probable tokens. (default: None = full vocabulary)
             token_clip:
-                if set, clips per-token divergence values to this maximum before reduction. Prevents style tokens from dominating the gradient signal over math tokens.
+                If set, sums divergence over the vocabulary first and then
+                clips each token's scalar divergence to this maximum before
+                sequence reduction.
 
         Returns:
             loss: Scalar tensor with the generalized JSD loss
@@ -461,7 +463,13 @@ class OPSDTrainer(SFTTrainer):
             # Compute the Generalized Jensen-Shannon Divergence
             jsd = beta * kl_teacher + (1 - beta) * kl_student
 
-        # Per-token clipping: cap each token's divergence value
+        # KL/JSD is only a divergence after summing the signed contributions
+        # over the vocabulary.  Clipping the [batch, token, vocab] tensor
+        # element-wise destroys that property and can even make the reduced
+        # value negative, so reduce the vocabulary dimension first.
+        jsd = jsd.sum(dim=-1)
+
+        # Optional clipping now operates on one scalar divergence per token.
         if token_clip is not None:
             jsd = jsd.clamp(max=token_clip)
 
@@ -625,6 +633,12 @@ class OPSDTrainer(SFTTrainer):
                     if name in saved:
                         param.data = saved[name]
 
+    @staticmethod
+    def _position_ids_from_attention_mask(attention_mask):
+        """Return padding-invariant position IDs for a left-padded batch."""
+        position_ids = attention_mask.long().cumsum(dim=-1) - 1
+        return position_ids.masked_fill(attention_mask == 0, 0)
+
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
         Compute the self-distillation loss with memory-efficient log-prob extraction.
@@ -641,6 +655,9 @@ class OPSDTrainer(SFTTrainer):
         outputs_student = model(
             input_ids=inputs["student_input_ids"],
             attention_mask=inputs["student_attention_mask"],
+            position_ids=self._position_ids_from_attention_mask(
+                inputs["student_attention_mask"]
+            ),
         )
 
         # Extract only what we need and convert to log-probs immediately
@@ -686,6 +703,9 @@ class OPSDTrainer(SFTTrainer):
             outputs_teacher = model(
                 input_ids=inputs["teacher_input_ids"],
                 attention_mask=inputs["teacher_attention_mask"],
+                position_ids=self._position_ids_from_attention_mask(
+                    inputs["teacher_attention_mask"]
+                ),
             )
 
             teacher_logits = outputs_teacher.logits[:, teacher_prompt_len - 1 : -1, :]
@@ -844,12 +864,18 @@ class OPSDTrainer(SFTTrainer):
             f"generation done - elapsed time: {elapsed_time:.2f}s, prompts: {num_prompts}, total tokens: {num_tokens}, avg length: {avg_completion_length}, speed: {tokens_per_sec:.1f} tok/s"
         )
 
-        new_attention_mask = torch.ones_like(generated_tokens)
+        prompt_length = inputs["student_prompts"].shape[1]
+        completion_ids = generated_tokens[:, prompt_length:]
+        completion_attention_mask = torch.ones_like(completion_ids)
+        if pad_token_id is not None:
+            completion_attention_mask[completion_ids == pad_token_id] = 0
+        new_attention_mask = torch.cat(
+            [inputs["student_prompt_attention_mask"], completion_attention_mask],
+            dim=1,
+        )
         new_labels = generated_tokens.clone()
 
-        if pad_token_id is not None:
-            new_labels[new_labels == pad_token_id] = -100
-            new_attention_mask[generated_tokens == pad_token_id] = 0
+        new_labels[new_attention_mask == 0] = -100
 
         return generated_tokens, new_attention_mask, new_labels
 
@@ -975,31 +1001,26 @@ class OPSDTrainer(SFTTrainer):
             f"vLLM generation done - elapsed time: {elapsed_time:.2f}s, prompts: {num_prompts}, total tokens: {total_completion_tokens}, avg length: {avg_completion_length:.1f}, speed: {tokens_per_sec:.1f} tok/s"
         )
 
-        # We need to combine prompt and completion for new_input_ids
-        # Tokenize prompts again to get prompt_ids on the correct device and format
-        # Use prompts_text_for_vllm (without special tokens) for tokenization since vLLM expects clean text
-        # Ensure add_special_tokens=False as vLLM typically handles prompts as raw text
-        # Calculate max_length for prompts, ensuring it's positive
-        prompt_max_length = (
-            max(1, self.args.max_length - max_completion_length) if self.args.max_length else None
-        )
-        prompt_tokenized = self.processing_class(
-            prompts_text_for_vllm,
-            return_tensors="pt",
-            padding="longest",
-            truncation=True if prompt_max_length else False,
-            max_length=prompt_max_length,
-            add_special_tokens=False,
-        ).to(device)
-        prompt_ids = prompt_tokenized.input_ids
+        # Reuse the exact audited prompt tensors. Decode/re-tokenize can change
+        # special-token boundaries and would make the batch prompt length used
+        # for loss slicing diverge from the actual concatenated tensor.
+        prompt_ids = inputs["student_prompts"].to(device)
+        prompt_attention_mask = inputs["student_prompt_attention_mask"].to(device)
 
-        completion_ids_tensors = [torch.tensor(ids, device=device) for ids in completion_ids]
+        completion_ids_tensors = [
+            torch.tensor(ids, device=device, dtype=prompt_ids.dtype)
+            for ids in completion_ids
+        ]
         # Manually pad/truncate completions to max_completion_length length before using pad function
         padded_completion_ids_list = []
+        padded_completion_attention_masks = []
         for completion_tensor in completion_ids_tensors:
             if len(completion_tensor) > max_completion_length:
                 # Truncate if longer than max_completion_length
                 padded_completion_ids_list.append(completion_tensor[:max_completion_length])
+                padded_completion_attention_masks.append(
+                    torch.ones(max_completion_length, device=device, dtype=torch.long)
+                )
             elif len(completion_tensor) < max_completion_length:
                 # Pad if shorter than max_completion_length
                 padding_needed = max_completion_length - len(completion_tensor)
@@ -1012,12 +1033,26 @@ class OPSDTrainer(SFTTrainer):
                     ]
                 )
                 padded_completion_ids_list.append(padded_tensor)
+                padded_completion_attention_masks.append(
+                    torch.cat(
+                        [
+                            torch.ones(len(completion_tensor), device=device, dtype=torch.long),
+                            torch.zeros(padding_needed, device=device, dtype=torch.long),
+                        ]
+                    )
+                )
             else:
                 # Already the right length
                 padded_completion_ids_list.append(completion_tensor)
+                padded_completion_attention_masks.append(
+                    torch.ones(max_completion_length, device=device, dtype=torch.long)
+                )
 
         # Now all tensors are the same length, so we can stack them
         padded_completion_ids = torch.stack(padded_completion_ids_list)
+        padded_completion_attention_mask = torch.stack(
+            padded_completion_attention_masks
+        )
 
         # Ensure prompt_ids and padded_completion_ids are 2D
         if prompt_ids.ndim == 1:
@@ -1027,12 +1062,13 @@ class OPSDTrainer(SFTTrainer):
 
         new_input_ids = torch.cat([prompt_ids, padded_completion_ids], dim=1)
 
-        new_attention_mask = torch.ones_like(new_input_ids, device=device)
+        new_attention_mask = torch.cat(
+            [prompt_attention_mask, padded_completion_attention_mask],
+            dim=1,
+        )
         new_labels = new_input_ids.clone()
 
-        if pad_token_id is not None:
-            new_labels[new_labels == pad_token_id] = -100
-            new_attention_mask[new_input_ids == pad_token_id] = 0
+        new_labels[new_attention_mask == 0] = -100
 
         # Extract completion texts from the generated completion IDs
         completion_texts = []
@@ -1401,22 +1437,23 @@ class OPSDTrainer(SFTTrainer):
         teacher_full_ids = torch.cat([teacher_prompts, generation_ids], dim=1)
 
         # Create attention mask for teacher
-        teacher_attention_mask = torch.ones_like(teacher_full_ids)
-        if self.processing_class.pad_token_id is not None:
-            teacher_attention_mask[teacher_full_ids == self.processing_class.pad_token_id] = 0
+        completion_attention_mask = generated_attention_mask[:, student_prompt_len:]
+        teacher_attention_mask = torch.cat(
+            [inputs["teacher_prompt_attention_mask"], completion_attention_mask],
+            dim=1,
+        )
 
         inputs["teacher_input_ids"] = teacher_full_ids
         inputs["teacher_attention_mask"] = teacher_attention_mask
 
         # Create labels for generation tokens
-        # Mask prompt tokens (use per-example lengths for accurate masking)
+        # Every column before ``student_prompt_len`` belongs to the rectangular
+        # left-padded prompt batch.  Mask the whole prompt region, not the first
+        # N columns based on unpadded lengths (which is only correct for right
+        # padding).
         labels = generated_ids.clone()
-        for i in range(labels.shape[0]):
-            actual_prompt_len = inputs["student_prompt_lengths_per_example"][i].item()
-            labels[i, :actual_prompt_len] = -100  # Mask actual prompt
-
-        if self.processing_class.pad_token_id is not None:
-            labels[labels == self.processing_class.pad_token_id] = -100
+        labels[:, :student_prompt_len] = -100
+        labels[generated_attention_mask == 0] = -100
 
         inputs["labels"] = labels
 
