@@ -68,12 +68,12 @@ every optimizer step plus sampled completions to W&B project
 override W&B behavior. There is no validation during training. Checkpoints
 are saved at steps 50 and 100, followed by `final_adapter`.
 
-The launcher removes `expandable_segments:True` from PyTorch's allocator
-configuration because it is incompatible with the vLLM sleep-mode memory
-pool. It also creates a writable Triton cache under `/tmp`. A Linux kernel
-older than 5.5 may still produce an Accelerate warning and can hang under
-heavy distributed/CUDA workloads; changing the kernel requires a newer host
-or container host rather than a Python package change.
+vLLM sleep mode is disabled by default. Its CUDA memory-pool sleep/wake path
+is not reliable on the Linux 4.19 kernels still used by some GPU hosts. The
+A800 recipe instead leaves vLLM resident at 30% GPU utilization. On a newer
+kernel, sleep mode can be explicitly tested with `--vllm-sleep-mode`; the
+trainer then removes the incompatible `expandable_segments:True` allocator
+setting. The launcher also creates a writable Triton cache under `/tmp`.
 
 ## Fixed training recipe
 
@@ -94,7 +94,7 @@ or container host rather than a Python package change.
 | loss | full-vocabulary forward KL (`beta=0`) |
 | point-wise token clip | 1e-6 |
 | sampling | temperature 0.8, top-p 0.95 |
-| vLLM | colocate, sleep mode, utilization 0.30 |
+| vLLM | colocate, resident (sleep off), utilization 0.30 |
 | seed | 2026 |
 
 At startup the trainer tokenizes all student and teacher prompts and refuses

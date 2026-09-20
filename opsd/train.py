@@ -27,8 +27,10 @@ LORA_TARGETS = [
 ]
 
 
-def _sanitize_allocator_environment() -> None:
+def _sanitize_allocator_environment(vllm_sleep_mode: bool) -> None:
     """Remove allocator settings that are incompatible with vLLM sleep mode."""
+    if not vllm_sleep_mode:
+        return
     for variable in ("PYTORCH_CUDA_ALLOC_CONF", "PYTORCH_ALLOC_CONF"):
         value = os.environ.get(variable)
         if not value:
@@ -71,6 +73,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--save-steps", type=int, default=50)
     parser.add_argument("--vllm-gpu-memory-utilization", type=float, default=0.30)
+    parser.add_argument(
+        "--vllm-sleep-mode",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enable vLLM CUDA memory-pool sleep/wake (disabled for kernel compatibility)",
+    )
     parser.add_argument("--jsd-token-clip", type=float, default=1e-6)
     parser.add_argument("--resume-from-checkpoint")
     return parser.parse_args()
@@ -189,7 +197,7 @@ def _audit_dataset(
 def main() -> None:
     args = parse_args()
     _validate_cli(args)
-    _sanitize_allocator_environment()
+    _sanitize_allocator_environment(args.vllm_sleep_mode)
 
     try:
         import torch
@@ -278,7 +286,7 @@ def main() -> None:
         "gradient_checkpointing": True,
         "vllm_mode": "colocate",
         "vllm_gpu_memory_utilization": args.vllm_gpu_memory_utilization,
-        "vllm_sleep_mode": True,
+        "vllm_sleep_mode": args.vllm_sleep_mode,
         "validation_during_training": False,
         "save_steps": args.save_steps,
         "seed": args.seed,
@@ -323,7 +331,7 @@ def main() -> None:
         vllm_mode="colocate",
         vllm_tensor_parallel_size=1,
         vllm_gpu_memory_utilization=args.vllm_gpu_memory_utilization,
-        vllm_enable_sleep_mode=True,
+        vllm_enable_sleep_mode=args.vllm_sleep_mode,
         vllm_sync_frequency=1,
         logging_strategy="steps",
         logging_steps=1,

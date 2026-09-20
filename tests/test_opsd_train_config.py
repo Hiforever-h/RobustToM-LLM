@@ -6,13 +6,17 @@ from argparse import Namespace
 from pathlib import Path
 from unittest.mock import patch
 
-from opsd.train import _sanitize_allocator_environment, _validate_cli
+from opsd.train import _sanitize_allocator_environment, _validate_cli, parse_args
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class OPSDTrainConfigTest(unittest.TestCase):
+    def test_vllm_sleep_mode_is_disabled_by_default(self):
+        with patch("sys.argv", ["opsd.train", "--model", "/tmp/model"]):
+            self.assertFalse(parse_args().vllm_sleep_mode)
+
     def _args(self, root: Path) -> Namespace:
         data = root / "train.jsonl"
         data.write_text("{}\n", encoding="utf-8")
@@ -77,9 +81,21 @@ class OPSDTrainConfigTest(unittest.TestCase):
             },
             clear=True,
         ):
-            _sanitize_allocator_environment()
+            _sanitize_allocator_environment(vllm_sleep_mode=True)
             self.assertEqual(
                 os.environ.get("PYTORCH_CUDA_ALLOC_CONF"), "max_split_size_mb:512"
+            )
+
+    def test_allocator_setting_is_preserved_when_sleep_mode_is_off(self):
+        with patch.dict(
+            "os.environ",
+            {"PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"},
+            clear=True,
+        ):
+            _sanitize_allocator_environment(vllm_sleep_mode=False)
+            self.assertEqual(
+                os.environ.get("PYTORCH_CUDA_ALLOC_CONF"),
+                "expandable_segments:True",
             )
 
 

@@ -65,12 +65,6 @@ case "${MODE}" in
         export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-true}"
         export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/tmp/robusttom-opsd-triton-cache}"
         mkdir -p "${TRITON_CACHE_DIR}"
-        if [[ "${PYTORCH_CUDA_ALLOC_CONF:-}" == *"expandable_segments:True"* ]]; then
-            printf '%s\n' \
-                "Removing PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True; vLLM sleep mode is incompatible with it." \
-                >&2
-            unset PYTORCH_CUDA_ALLOC_CONF
-        fi
         export WANDB_PROJECT="${WANDB_PROJECT_NAME}"
         "${PYTHON_BIN}" -m accelerate.commands.launch \
             --config_file opsd/accelerate_single_gpu.yaml \
