@@ -101,10 +101,42 @@ At startup the trainer tokenizes all student and teacher prompts and refuses
 to truncate any prompt. It also writes the resolved configuration and prompt
 length audit to `run_manifest.json` before loading the training model.
 
-## Merge for evaluation
+## Evaluate without merging
 
-Training saves a LoRA adapter. Merge it into the same GRPO checkpoint before
-using the existing `rft.generate` evaluator:
+The evaluator can attach a checkpoint or final PEFT adapter to the unchanged
+GRPO base model at runtime. For example, evaluate the final adapter on the
+unprivileged validation split with deterministic decoding:
+
+```bash
+export BASE_MODEL=/path/to/grpo/actor/global_step_800
+export ADAPTER=runs/opsd/qwen25-3b-grpo-privileged-opsd-100step/final_adapter
+export EVAL_DIR=runs/opsd_eval/final
+
+python -m rft.generate \
+  --data data/counterfactual_process_reward_v4_natural/val.jsonl \
+  --model "$BASE_MODEL" \
+  --adapter "$ADAPTER" \
+  --output "$EVAL_DIR/val_predictions.jsonl" \
+  --backend vllm \
+  --max-new-tokens 384 \
+  --seed 2026 \
+  --compact-prompt
+
+python -m rft.evaluate \
+  --predictions "$EVAL_DIR/val_predictions.jsonl" \
+  --data data/counterfactual_process_reward_v4_natural/val.jsonl \
+  --output "$EVAL_DIR/val_rule_metrics.json" \
+  --compact-prompt
+```
+
+Set `ADAPTER` to `checkpoint-50` to evaluate the midpoint. vLLM loads the
+adapter with its native `LoRARequest`; `--backend transformers` instead uses
+PEFT. In both cases the base checkpoint is left unchanged, and
+`rft.evaluate` needs no adapter argument.
+
+## Optional merge
+
+Merging is only needed when another inference system cannot load PEFT adapters:
 
 ```bash
 export OPSD_MODEL_PATH=/path/to/grpo/actor/global_step_800

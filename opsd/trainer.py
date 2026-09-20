@@ -860,21 +860,21 @@ class OPSDTrainer(SFTTrainer):
 
         device = self.accelerator.device
 
+        # Decode only attention-mask-visible tokens. Qwen commonly reuses EOS
+        # as PAD, so decoding the rectangular batch tensor directly would add
+        # misleading repeated ``<|endoftext|>`` tokens to W&B prompt tables.
+        prompt_token_ids = [
+            token_ids[attention_mask.bool()].tolist()
+            for token_ids, attention_mask in zip(
+                inputs["student_prompts"],
+                inputs["student_prompt_attention_mask"],
+            )
+        ]
         prompts_text_for_vllm = self.processing_class.batch_decode(
-            inputs["student_prompts"],
+            prompt_token_ids,
             skip_special_tokens=False,
         )
-        # Remove padding token text if it appears, as vLLM expects clean prompts
-        if self.processing_class.pad_token:
-            prompts_text_for_vllm = [
-                p.replace(self.processing_class.pad_token, "") for p in prompts_text_for_vllm
-            ]
-
-        # Also decode prompts WITH special tokens for logging
-        prompts_text_with_special = self.processing_class.batch_decode(
-            inputs["student_prompts"],
-            skip_special_tokens=False,
-        )
+        prompts_text_with_special = list(prompts_text_for_vllm)
 
         # system_prompt = "Please reason step by step, and put your final answer within \\boxed{}."
         # target_system_prompt = "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."
