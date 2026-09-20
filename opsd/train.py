@@ -73,15 +73,22 @@ def _validate_cli(args: argparse.Namespace) -> None:
         )
     if not (model_path / "config.json").is_file():
         raise FileNotFoundError(f"Missing model config: {model_path / 'config.json'}")
-    if (
-        args.output_dir.exists()
-        and any(args.output_dir.iterdir())
-        and args.resume_from_checkpoint is None
-    ):
-        raise FileExistsError(
-            f"Output directory is not empty: {args.output_dir}. Use a new directory "
-            "or pass --resume-from-checkpoint."
+    if args.output_dir.exists() and args.resume_from_checkpoint is None:
+        # ``run_manifest.json`` is written before the heavyweight trainer is
+        # initialized.  Allow a clean retry when initialization failed after
+        # that write but before any checkpoint or model artifact was created.
+        blocking_entries = sorted(
+            path.name
+            for path in args.output_dir.iterdir()
+            if path.name != "run_manifest.json"
         )
+        if blocking_entries:
+            preview = ", ".join(blocking_entries[:5])
+            raise FileExistsError(
+                f"Output directory already contains training artifacts: "
+                f"{args.output_dir} ({preview}). Use a new directory or pass "
+                "--resume-from-checkpoint."
+            )
 
 
 def _render_prompt(tokenizer: Any, prompt: str) -> str:
@@ -305,6 +312,11 @@ def main() -> None:
         dataloader_drop_last=True,
         dataloader_num_workers=0,
         remove_unused_columns=True,
+        # OPSD's collator consumes the raw ``problem``/``solution`` columns and
+        # constructs two differently conditioned sequences on the fly.  The
+        # inherited SFTTrainer preprocessing otherwise tries to tokenize the
+        # default ``text`` column before our collator runs.
+        dataset_kwargs={"skip_prepare_dataset": True},
         seed=args.seed,
         data_seed=args.seed,
         model_init_kwargs={
