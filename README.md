@@ -16,7 +16,17 @@ State: ceramic_jar
 Answer: ceramic_jar
 ```
 
-compact prompt只解释`N`的含义和输出协议，不向模型提供数字阶数、gold state、belief chain或空白答案模板。
+### Reward计算公式
+
+reward为：
+
+$$
+R=0.75\cdot\frac{1}{N}\sum_{i=1}^{N}s_i(0.40+0.60j_i)
+ +0.05\left(0.70\frac{L}{N}+0.30F\right)
+ +0.20\,A\prod_{i=1}^{N}s_i.
+$$
+
+其中，`N`是目标ToM阶数；`s_i∈{0,1}`表示第`i`个`State`是否与标准信念状态一致；`j_i∈[0,1]`是LLM Judge对该步自然语言推理的评分，推理缺失时记为`0`。`L`是从`Think 1`开始、编号连续、各自包含非空推理和恰好一个非空`State`且`State`后没有多余内容的有效前缀长度；`F∈{0,1}`表示完整输出满足严格的`Think/State/Answer`结构；`A∈{0,1}`表示最终`Answer`正确。只有所有`State`都正确，才发放`0.20`的答案奖励。
 
 ## 主要结果
 
